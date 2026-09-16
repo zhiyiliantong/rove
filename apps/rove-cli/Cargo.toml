@@ -1,0 +1,27 @@
+[package]
+name = "rove-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rove"
+path = "src/main.rs"
+
+[dependencies]
+rove-sdk.workspace = true
+rove-protocol.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+rpassword = "=7.5.4"
+open = { version = "=5.4.3", features = ["shellexecute-on-windows"] }
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+rove-agent.workspace = true
+tempfile.workspace = true
+tokio-util.workspace = true

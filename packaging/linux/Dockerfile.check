@@ -1,0 +1,11 @@
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+
+# Development-only native Tauri compiler dependencies. The host toolchain and
+# Rove workspace are mounted by the explicit check command, not copied here.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates build-essential pkg-config \
+       libgtk-3-dev libwebkit2gtk-4.1-dev \
+    && apt-get clean
+
+WORKDIR /work

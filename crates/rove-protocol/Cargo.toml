@@ -1,0 +1,17 @@
+[package]
+name = "rove-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rove-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+jsonschema.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+serde_json.workspace = true

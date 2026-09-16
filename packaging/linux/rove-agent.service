@@ -1,0 +1,16 @@
+[Unit]
+Description=Rove per-device agent (current user)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/rove/rove-agent --easytier-portal 127.0.0.1:15888 --easytier-core /usr/lib/rove/easytier-core
+UMask=0077
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+# Deliberately not sandboxed: system_exec must act as this OS user.
+# Do not enable this unit for multiple accounts against the same portal.
+
+[Install]
+WantedBy=default.target

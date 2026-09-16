@@ -1,0 +1,2177 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rove prototype adapter contract",
+    "version": "0.6.0",
+    "description": "Design-only UI contract. No HTTP server implements these routes. In-process PrototypeApi methods use their request shapes and unwrapped result values. This is not the existing rove-agent API, not an OAuth proxy, and not evidence of background task execution."
+  },
+  "servers": [
+    {
+      "url": "https://prototype.example.invalid",
+      "description": "Non-routable documentation placeholder"
+    }
+  ],
+  "paths": {
+    "/snapshot": {
+      "get": {
+        "operationId": "demo_snapshot",
+        "summary": "Reconcile demo timeline and retrieve a UI snapshot",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reset": {
+      "post": {
+        "operationId": "demo_reset",
+        "summary": "Reset browser-only demonstration data",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scenario"
+                ],
+                "properties": {
+                  "scenario": {
+                    "$ref": "#/components/schemas/Scenario"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/import": {
+      "post": {
+        "operationId": "demo_import_models",
+        "summary": "Batch model records share one demo credential reference; no real credentials accepted",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "model_ids"
+                  ],
+                  "properties": {
+                    "model_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelImport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{id}": {
+      "patch": {
+        "operationId": "demo_edit_connection",
+        "summary": "Edit shared connection metadata",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "base_url"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "base_url": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/models/{id}": {
+      "delete": {
+        "operationId": "demo_delete_model",
+        "summary": "Delete a model, retaining sibling models and history",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/default-model": {
+      "put": {
+        "operationId": "demo_set_default_model",
+        "summary": "Select one default for future local sessions",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "model_id"
+                ],
+                "properties": {
+                  "model_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "post": {
+        "operationId": "demo_create_session",
+        "summary": "Create a local-owned conversation",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{id}/draft": {
+      "put": {
+        "operationId": "demo_save_draft",
+        "summary": "Persist a browser demo draft",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_archived: restore before editing or submitting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "draft"
+                ],
+                "properties": {
+                  "draft": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/model": {
+      "put": {
+        "operationId": "demo_set_session_model",
+        "summary": "Change model for future submissions, not existing runs",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_archived: restore before editing or submitting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "model_id"
+                ],
+                "properties": {
+                  "model_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/runs": {
+      "post": {
+        "operationId": "demo_submit_run",
+        "summary": "Submit a demo task; disconnected targets reject before acceptance",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_archived: restore before editing or submitting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text",
+                  "device_id"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "device_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/runs/{id}/cancel": {
+      "post": {
+        "operationId": "demo_cancel_run",
+        "summary": "Cancel only on explicit user action",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/networks": {
+      "post": {
+        "operationId": "demo_create_network",
+        "summary": "Save four-field demo network; no EasyTier side effect",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkCard"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/networks/{id}": {
+      "put": {
+        "operationId": "demo_update_network",
+        "summary": "Update saved network card",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkCard"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "demo_delete_network",
+        "summary": "Delete only disconnected saved network",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/devices/{id}/models": {
+      "post": {
+        "operationId": "demo_sync_models",
+        "summary": "Simulate explicit one-time copy to reachable target",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "model_ids"
+                ],
+                "properties": {
+                  "model_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/settings/concurrency": {
+      "put": {
+        "operationId": "demo_set_concurrency",
+        "summary": "Configure local agent concurrency only",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{id}/target": {
+      "put": {
+        "operationId": "demo_set_session_target",
+        "summary": "Persist per-session draft target; existing accepted runs remain pinned",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_archived: restore before editing or submitting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "device_id"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/networks/{id}/connection": {
+      "put": {
+        "operationId": "demo_connect_network",
+        "summary": "Connect one network without disconnecting others; reject overlapping actual ranges",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "DHCP pending, not connected. Observe snapshot for allocated range/conflict. Mock returns void and exposes these semantics in snapshot."
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Network range conflict. New network records conflict; previously connected networks remain unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "demo_disconnect_network",
+        "summary": "Disconnect or cancel pending DHCP for only the specified network",
+        "responses": {
+          "200": {
+            "description": "Mock result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or unavailable target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/peers/probe": {
+      "post": {
+        "operationId": "demo_probe_peer",
+        "summary": "Mock one peer connectivity test; no network request",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "peer"
+                ],
+                "properties": {
+                  "peer": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Simulated per-peer result, including invalid address or timeout. Editing the row invalidates the result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeerProbe"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model-catalog": {
+      "post": {
+        "operationId": "demo_list_model_catalog",
+        "summary": "Read vendor presets or simulate API/account model discovery",
+        "description": "Presets do not assert account entitlement. Failed simulated discovery leaves preset/manual fallback available. Production discovery must be implemented through SDK/agent and an official adapter, not direct browser credential use.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Catalog with explicit provenance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported adapter or simulated discovery failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/providers": {
+      "get": {
+        "operationId": "demo_list_providers",
+        "summary": "List built-in provider form presets (not installed adapters or verified accounts)",
+        "description": "In-process PrototypeApi.listProviders returns only the 12 retained presets with dedicated provider modules in the project's pinned rig-core 0.42.0. google maps to gemini; new GLM configurations use zai (international endpoint). No new qwen, volcengine, siliconflow or custom entries. Legacy saved configuration is preserved independently. No real adapters are invoked, no external request is sent.",
+        "responses": {
+          "200": {
+            "description": "Bundled provider metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Provider"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{id}/archive": {
+      "post": {
+        "operationId": "archiveSession",
+        "summary": "Archive without cancelling tasks; repeated archive preserves original timestamp",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; no response body. Archive/restore are idempotent."
+          },
+          "404": {
+            "description": "session_not_found: conversation does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "restoreSession",
+        "summary": "Restore the same conversation without replaying tasks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; no response body. Archive/restore are idempotent."
+          },
+          "404": {
+            "description": "session_not_found: conversation does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{id}": {
+      "delete": {
+        "operationId": "deleteSession",
+        "summary": "Permanently delete an archived conversation and terminal run history only; never delete services",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; no response body. Archive/restore are idempotent."
+          },
+          "404": {
+            "description": "session_not_found: conversation does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_not_archived or session_has_active_runs: no records deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Connection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "base_url",
+          "auth_kind",
+          "credential_ref"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "description": "New UI selections come from demo_list_providers (Rig 0.42.0): openai, deepseek, anthropic, google, moonshot, zai, minimax, mistral, xai, openrouter, groq, ollama. Historical IDs including qwen, zhipu, volcengine, siliconflow, custom and legacy demo strings remain valid for saved data and backward-compatible in-process fixtures; they are not offered for new UI connections. Never rewrite saved IDs or URLs automatically."
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "auth_kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "official_agent"
+            ]
+          },
+          "credential_ref": {
+            "const": "demo-only"
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "connection_id",
+          "model",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable editable display name. Defaults to provider-model-sequence; can be overridden during import. Names are trimmed, nonblank and unique in local saved models. Vendor model ID remains unchanged."
+          }
+        }
+      },
+      "NetworkCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "subnet",
+          "network_key",
+          "initial_peers"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "subnet": {
+            "type": "string",
+            "description": "Canonical IPv4 CIDR, or literal dhcp for EasyTier automatic addressing. DHCP does not configure a custom allocation pool. Three-octet shorthand/host bits normalize on save. Actual range is runtime state, not a guarantee in a shared card."
+          },
+          "network_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Demo shared secret, generated by Rove as 32 random bytes encoded as 64 hex characters. EasyTier accepts a string; imported/manual non-hex secrets are preserved. Not an asymmetric private key. Do not enter production credentials."
+          },
+          "initial_peers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Editable peer URIs; each may be independently mock-probed. A probe never proves network authentication."
+          }
+        }
+      },
+      "Network": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "subnet",
+          "network_key",
+          "initial_peers",
+          "connection_status",
+          "resolved_subnet",
+          "local_ip",
+          "connection_error",
+          "connect_started_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subnet": {
+            "type": "string",
+            "description": "Canonical IPv4 CIDR, or literal dhcp for EasyTier automatic addressing. DHCP does not configure a custom allocation pool. Three-octet shorthand/host bits normalize on save. Actual range is runtime state, not a guarantee in a shared card."
+          },
+          "network_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Demo shared secret, generated by Rove as 32 random bytes encoded as 64 hex characters. EasyTier accepts a string; imported/manual non-hex secrets are preserved. Not an asymmetric private key. Do not enter production credentials."
+          },
+          "initial_peers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Editable peer URIs; each may be independently mock-probed. A probe never proves network authentication."
+          },
+          "connection_status": {
+            "type": "string",
+            "enum": [
+              "disconnected",
+              "waiting_dhcp",
+              "connected",
+              "conflict"
+            ]
+          },
+          "resolved_subnet": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Observed/simulated range; when conflict it is NOT joined."
+          },
+          "local_ip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connection_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connect_started_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "description": "Per-network runtime on this local peer. Any number may be connected if ranges do not overlap. Waiting DHCP is not connected. Disconnect/edit/delete never silently disconnect another network."
+      },
+      "Device": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "network_id",
+          "name",
+          "os",
+          "ip",
+          "online",
+          "model_ids",
+          "model_copies"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "network_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "model_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model_copies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelCopy"
+            }
+          }
+        },
+        "description": "Prototype remote fixture is a network-scoped view. Local stable device_id is local with empty network_id; each network stores its own local_ip. Production must normalize Device vs memberships and route by (device_id, network_id); this DTO is not the agent DTO."
+      },
+      "Service": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "device_id",
+          "network_id",
+          "name",
+          "address",
+          "reachable",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "network_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "music",
+              "files",
+              "code"
+            ]
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "role",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Optional job association on its user prompt and final assistant reply. UI renders one assistant job bubble after its prompt and updates it with the final reply. Historical messages without a link remain visible; no task is resubmitted."
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "owner_device_id",
+          "model_id",
+          "draft",
+          "onboarding",
+          "messages",
+          "target_device_id",
+          "archived_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "owner_device_id": {
+            "const": "local"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "string"
+          },
+          "onboarding": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "target_device_id": {
+            "type": "string"
+          },
+          "archived_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Unix milliseconds when archived; null for an active conversation."
+          }
+        }
+      },
+      "RunStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ]
+      },
+      "Run": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "session_id",
+          "device_id",
+          "network_id",
+          "model_id",
+          "status",
+          "submitted_at",
+          "started_at",
+          "progress",
+          "outcome",
+          "waiting_connection",
+          "intent",
+          "error",
+          "service_id",
+          "service_name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "network_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "submitted_at": {
+            "type": "number"
+          },
+          "started_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "progress": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "unsupported"
+            ]
+          },
+          "waiting_connection": {
+            "type": "boolean"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "install_music",
+              "rename_service",
+              "remove_service",
+              "query"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_text": {
+            "type": "string",
+            "description": "Optional accumulated Markdown reply prefix generated by deterministic prototype timing, not real SSE/model output. Reconciled from task time after reload; stops changing while waiting for connection or cancelled. Completion saves the final linked assistant message. UI provides safe Markdown/math rendering and copy/speech actions locally; these are not HTTP endpoints."
+          }
+        }
+      },
+      "Scenario": {
+        "type": "string",
+        "enum": [
+          "daily",
+          "empty",
+          "offline",
+          "failure",
+          "unsupported"
+        ]
+      },
+      "Snapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "scenario",
+          "initialized",
+          "connections",
+          "models",
+          "default_model_id",
+          "networks",
+          "devices",
+          "services",
+          "sessions",
+          "runs",
+          "max_active_runs"
+        ],
+        "properties": {
+          "version": {
+            "const": 4
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario"
+          },
+          "initialized": {
+            "type": "boolean"
+          },
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            }
+          },
+          "default_model_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Network"
+            }
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            }
+          },
+          "max_active_runs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          }
+        }
+      },
+      "ModelImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "provider",
+          "base_url",
+          "auth_kind",
+          "models"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Shared connection label. UI defaults to the first model display name (automatically generated or manually edited). Each Model has an independent display name."
+          },
+          "provider": {
+            "type": "string",
+            "description": "New UI selections come from demo_list_providers (Rig 0.42.0): openai, deepseek, anthropic, google, moonshot, zai, minimax, mistral, xai, openrouter, groq, ollama. Historical IDs including qwen, zhipu, volcengine, siliconflow, custom and legacy demo strings remain valid for saved data and backward-compatible in-process fixtures; they are not offered for new UI connections. Never rewrite saved IDs or URLs automatically."
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "auth_kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "official_agent"
+            ],
+            "description": "Mutually exclusive API key or official-agent account adapter. Account support in this prototype: OpenAI/Codex and Anthropic/Claude Code; no real login or session export."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "model_names": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "description": "Optional map from exact selected model ID to editable display name. Missing entry uses provider-model-sequence generation. Trim supplied names; reject blank or duplicate names against this batch and existing models before any mutation. Does not change provider model ID or shared credentials."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "session_not_found",
+              "session_archived",
+              "session_not_archived",
+              "session_has_active_runs"
+            ],
+            "description": "Present for session lifecycle errors."
+          }
+        }
+      },
+      "IdResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "ModelCopy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_model_id",
+          "model",
+          "connection_name",
+          "base_url",
+          "credential_ref"
+        ],
+        "properties": {
+          "source_model_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "connection_name": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "credential_ref": {
+            "const": "demo-only"
+          }
+        }
+      },
+      "PeerProbe": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "peer",
+          "status",
+          "latency_ms",
+          "simulated",
+          "message"
+        ],
+        "properties": {
+          "peer": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "reachable",
+              "timed_out",
+              "invalid"
+            ]
+          },
+          "latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "simulated": {
+            "const": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ModelCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "auth_kind",
+          "source",
+          "checked_on",
+          "models",
+          "message"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "New UI selections come from demo_list_providers (Rig 0.42.0): openai, deepseek, anthropic, google, moonshot, zai, minimax, mistral, xai, openrouter, groq, ollama. Historical IDs including qwen, zhipu, volcengine, siliconflow, custom and legacy demo strings remain valid for saved data and backward-compatible in-process fixtures; they are not offered for new UI connections. Never rewrite saved IDs or URLs automatically."
+          },
+          "auth_kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "official_agent"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "preset",
+              "mock_api",
+              "mock_account"
+            ]
+          },
+          "checked_on": {
+            "type": "string",
+            "description": "Date the bundled vendor references were checked; not a successful live fetch timestamp."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogModel"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "description": "Provider reference catalog, not an entitlement list. On opening or invalidating the add form, all listed model IDs are selected by default; users may deselect entries and edit each generated display name."
+      },
+      "CatalogModel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "note"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "CatalogRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "auth_kind",
+          "refresh"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "New UI selections come from demo_list_providers (Rig 0.42.0): openai, deepseek, anthropic, google, moonshot, zai, minimax, mistral, xai, openrouter, groq, ollama. Historical IDs including qwen, zhipu, volcengine, siliconflow, custom and legacy demo strings remain valid for saved data and backward-compatible in-process fixtures; they are not offered for new UI connections. Never rewrite saved IDs or URLs automatically."
+          },
+          "auth_kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "official_agent"
+            ]
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "false returns presets immediately; true demonstrates authenticated discovery. No real API call or login, no user secret in this request."
+          }
+        }
+      },
+      "Provider": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "category",
+          "base_url",
+          "account_adapter",
+          "docs",
+          "keywords",
+          "note",
+          "allow_empty_key",
+          "rig_provider"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "enum": [
+              "openai",
+              "deepseek",
+              "anthropic",
+              "google",
+              "moonshot",
+              "zai",
+              "minimax",
+              "mistral",
+              "xai",
+              "openrouter",
+              "groq",
+              "ollama"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "模型厂商",
+              "聚合 / 推理平台",
+              "本地 / 自定义"
+            ]
+          },
+          "base_url": {
+            "type": "string",
+            "description": "Editable default, not a universal URL across regions/workspaces/plans. Never requested by this prototype."
+          },
+          "account_adapter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the simulated official account path; null disables account login. Not evidence of a real installed adapter."
+          },
+          "docs": {
+            "type": "string",
+            "description": "Official metadata source URL, empty for custom endpoints."
+          },
+          "keywords": {
+            "type": "string",
+            "description": "Additional Chinese/English search aliases."
+          },
+          "note": {
+            "type": "string",
+            "description": "Visible endpoint, region, plan or protocol caveats."
+          },
+          "allow_empty_key": {
+            "type": "boolean",
+            "description": "UI may accept an empty demo key for local/custom presets. Does not assert that a user-edited endpoint is unauthenticated; any nonempty input must still be demo-key. No key is sent or stored."
+          },
+          "rig_provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "deepseek",
+              "anthropic",
+              "gemini",
+              "moonshot",
+              "zai",
+              "minimax",
+              "mistral",
+              "xai",
+              "openrouter",
+              "groq",
+              "ollama"
+            ],
+            "description": "Dedicated Rig 0.42.0 module used to admit this new-provider preset. Not proof of a working Rove backend integration or support for every model capability. Historical UI-only metadata may have null but is excluded from this endpoint."
+          }
+        }
+      }
+    }
+  }
+}

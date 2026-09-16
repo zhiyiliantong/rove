@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "category": "Utility",
+    "shortDescription": "Rove peer device workspace",
+    "linux": {
+      "deb": {
+        "depends": ["rove-runtime (= 0.1.0)"]
+      }
+    }
+  }
+}

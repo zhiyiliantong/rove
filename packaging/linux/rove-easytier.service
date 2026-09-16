@@ -1,0 +1,23 @@
+[Unit]
+Description=Rove dedicated EasyTier network runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/rove/easytier-core --daemon --config-dir /var/lib/rove-easytier --rpc-portal 127.0.0.1:15888 --rpc-portal-whitelist 127.0.0.1/32
+StateDirectory=rove-easytier
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+DevicePolicy=closed
+DeviceAllow=/dev/net/tun rw
+
+[Install]
+WantedBy=multi-user.target

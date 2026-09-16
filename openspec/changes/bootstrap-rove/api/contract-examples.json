@@ -1,0 +1,421 @@
+{
+  "description": "契约结构示例；false 用例必须被 schema 拒绝。示例不是实际网络凭据。",
+  "cases": [
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SettingsPatch",
+      "value": {
+        "max_active_runs": 0
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SettingsPatch",
+      "value": {},
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunSubmit",
+      "value": {
+        "message": "missing id"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunSubmit",
+      "value": {
+        "request_id": "not-a-uuid",
+        "message": "hello"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "JoinConfig",
+      "value": {
+        "schema_version": 1,
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "display_name": "家庭网络",
+        "easytier": {
+          "network_name": "rove-family",
+          "network_secret": "example-network-secret-not-for-production",
+          "bootstrap_peers": [
+            "tcp://192.0.2.1:11010"
+          ],
+          "ipv4_cidr": "10.144.0.0/24",
+          "dhcp": true
+        },
+        "device_id": "00000000-0000-4000-8000-000000000099"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "NetworkImport",
+      "value": {
+        "source": "manual",
+        "url": "https://config.example.com/c/x"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ServiceWrite",
+      "value": {
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "name": "音乐",
+        "target": {
+          "host": "192.0.2.1",
+          "port": 80
+        },
+        "protocol": "http",
+        "access_info": "示例账号请使用应用自身设置"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ServiceWrite",
+      "value": {
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "name": "音乐",
+        "target": {
+          "host": "127.0.0.1",
+          "port": 4533
+        },
+        "protocol": "http",
+        "access_info": "示例账号请使用应用自身设置",
+        "listen_port": 65536
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SocketRequest",
+      "value": {
+        "kind": "request",
+        "correlation_id": "00000000-0000-4000-8000-000000000011",
+        "operation_id": "submit_run",
+        "target": {
+          "device_id": "00000000-0000-4000-8000-000000000022"
+        },
+        "path_parameters": {
+          "session_id": "00000000-0000-4000-8000-000000000031"
+        },
+        "body": {
+          "request_id": "00000000-0000-4000-8000-000000000041",
+          "message": "在这台设备上装配音乐服务器",
+          "network_id": "00000000-0000-4000-8000-000000000021"
+        }
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunEvent",
+      "value": {
+        "run_id": "00000000-0000-4000-8000-000000000001",
+        "seq": 1,
+        "created_at": "2026-09-07T00:00:00Z",
+        "kind": "tool_started",
+        "data": {
+          "text": "wrong payload"
+        }
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ModelConfigState",
+      "value": {
+        "configured": true,
+        "config": null
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "Settings",
+      "value": {
+        "max_active_runs": 4,
+        "config_server_url": "https://config.example.com"
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SettingsPatch",
+      "value": {
+        "max_active_runs": 6
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ModelConfigWrite",
+      "value": {
+        "provider": "openai_compatible",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "example-model",
+        "api_key": null
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ModelConfigState",
+      "value": {
+        "configured": false,
+        "config": null
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "JoinConfig",
+      "value": {
+        "schema_version": 1,
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "display_name": "家庭网络",
+        "easytier": {
+          "network_name": "rove-family",
+          "network_secret": "example-network-secret-not-for-production",
+          "bootstrap_peers": [
+            "tcp://192.0.2.1:11010"
+          ],
+          "ipv4_cidr": "10.144.0.0/24",
+          "dhcp": true
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "NetworkImport",
+      "value": {
+        "source": "manual",
+        "config": {
+          "schema_version": 1,
+          "network_id": "00000000-0000-4000-8000-000000000021",
+          "display_name": "家庭网络",
+          "easytier": {
+            "network_name": "rove-family",
+            "network_secret": "example-network-secret-not-for-production",
+            "bootstrap_peers": [
+              "tcp://192.0.2.1:11010"
+            ],
+            "ipv4_cidr": "10.144.0.0/24",
+            "dhcp": true
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunSubmit",
+      "value": {
+        "request_id": "00000000-0000-4000-8000-000000000041",
+        "message": "在这台设备上装配音乐服务器",
+        "network_id": "00000000-0000-4000-8000-000000000021"
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "Run",
+      "value": {
+        "run_id": "00000000-0000-4000-8000-000000000001",
+        "request_id": "00000000-0000-4000-8000-000000000041",
+        "session_id": "00000000-0000-4000-8000-000000000031",
+        "device_id": "00000000-0000-4000-8000-000000000022",
+        "status": "queued",
+        "created_at": "2026-09-07T00:00:00Z",
+        "started_at": null,
+        "finished_at": null,
+        "model": null,
+        "last_seq": 1,
+        "error": null,
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "input_message": "在这台设备上装配音乐服务器"
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunSnapshot",
+      "value": {
+        "run": {
+          "run_id": "00000000-0000-4000-8000-000000000001",
+          "request_id": "00000000-0000-4000-8000-000000000041",
+          "session_id": "00000000-0000-4000-8000-000000000031",
+          "device_id": "00000000-0000-4000-8000-000000000022",
+          "status": "queued",
+          "created_at": "2026-09-07T00:00:00Z",
+          "started_at": null,
+          "finished_at": null,
+          "model": null,
+          "last_seq": 1,
+          "error": null,
+          "network_id": "00000000-0000-4000-8000-000000000021",
+          "input_message": "在这台设备上装配音乐服务器"
+        },
+        "snapshot_seq": 1,
+        "output_tail": "",
+        "output_truncated": false,
+        "retained_from_seq": 1
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ServiceWrite",
+      "value": {
+        "network_id": "00000000-0000-4000-8000-000000000021",
+        "name": "音乐",
+        "target": {
+          "host": "127.0.0.1",
+          "port": 4533
+        },
+        "protocol": "http",
+        "access_info": "示例账号请使用应用自身设置"
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "RunEvent",
+      "value": {
+        "run_id": "00000000-0000-4000-8000-000000000001",
+        "seq": 1,
+        "created_at": "2026-09-07T00:00:00Z",
+        "kind": "status",
+        "data": {
+          "status": "queued"
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SocketRequest",
+      "value": {
+        "kind": "request",
+        "correlation_id": "00000000-0000-4000-8000-000000000011",
+        "operation_id": "submit_run",
+        "target": {
+          "network_id": "00000000-0000-4000-8000-000000000021",
+          "device_id": "00000000-0000-4000-8000-000000000022"
+        },
+        "path_parameters": {
+          "session_id": "00000000-0000-4000-8000-000000000031"
+        },
+        "body": {
+          "request_id": "00000000-0000-4000-8000-000000000041",
+          "message": "在这台设备上装配音乐服务器",
+          "network_id": "00000000-0000-4000-8000-000000000021"
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SocketResponse",
+      "value": {
+        "kind": "response",
+        "correlation_id": "00000000-0000-4000-8000-000000000011",
+        "status_code": 202,
+        "body": {
+          "run_id": "00000000-0000-4000-8000-000000000001",
+          "request_id": "00000000-0000-4000-8000-000000000041",
+          "session_id": "00000000-0000-4000-8000-000000000031",
+          "device_id": "00000000-0000-4000-8000-000000000022",
+          "status": "queued",
+          "created_at": "2026-09-07T00:00:00Z",
+          "started_at": null,
+          "finished_at": null,
+          "model": null,
+          "last_seq": 1,
+          "error": null,
+          "network_id": "00000000-0000-4000-8000-000000000021",
+          "input_message": "在这台设备上装配音乐服务器"
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "ErrorResponse",
+      "value": {
+        "error": {
+          "code": "queue_full",
+          "message": "等待队列已满，请稍后重试",
+          "retryable": true
+        }
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-config-server.openapi.json",
+      "schema": "BlobUpload",
+      "value": {
+        "envelope": {
+          "schema_version": 1,
+          "algorithm": "aes-256-gcm",
+          "nonce": "AAAAAAAAAAAAAAAA",
+          "ciphertext": "AAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "key": "do-not-upload-key"
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SystemExecInput",
+      "value": {
+        "command": "printf example",
+        "timeout_seconds": 1
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SystemExecInput",
+      "value": {
+        "command": "printf example",
+        "timeout_seconds": 86400
+      },
+      "valid": true
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SystemExecInput",
+      "value": {
+        "command": "printf example",
+        "timeout_seconds": 86401
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SystemExecInput",
+      "value": {
+        "command": "printf example",
+        "timeout_seconds": 0
+      },
+      "valid": false
+    },
+    {
+      "api": "rove-agent.openapi.json",
+      "schema": "SystemExecInput",
+      "value": {
+        "command": "printf example",
+        "timeout_seconds": 1.5
+      },
+      "valid": false
+    }
+  ]
+}

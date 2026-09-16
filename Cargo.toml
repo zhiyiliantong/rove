@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/rove-core", "crates/rove-protocol", "crates/rove-sdk", "crates/rove-agent", "apps/rove-cli", "apps/rove-gui/src-tauri", "services/rove-config-server"]
+default-members = ["crates/rove-core", "crates/rove-protocol", "crates/rove-sdk", "crates/rove-agent", "apps/rove-cli", "services/rove-config-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+
+[workspace.dependencies]
+rove-core = { path = "crates/rove-core" }
+rove-protocol = { path = "crates/rove-protocol" }
+rove-sdk = { path = "crates/rove-sdk" }
+rove-agent = { path = "crates/rove-agent" }
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.24", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1.53", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+jsonschema = { version = "=0.55.0", default-features = false }
+rusqlite = { version = "=0.40.2", features = ["bundled", "backup"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "query"] }
+axum = "0.8"
+fs2 = "0.4"
+base64 = "0.22"
+aes-gcm = "0.10"
+url = "2.5"
+ipnet = "2.11"
+tempfile = "3.27"
+getrandom = "0.4"
+libc = "0.2"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.dev]
+debug = 0
+incremental = false

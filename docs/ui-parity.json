@@ -1,0 +1,43 @@
+{
+  "scope": "客户端入口映射，不等于 overlay、真实 WebView 或安装包验收",
+  "operations": {
+    "get_hello": {"cli":"SDK 自动握手 / call get_hello","gui":"SDK 自动握手","source":"crates/rove-sdk/src/lib.rs"},
+    "get_device": {"cli":"device show / agent status / status","gui":"目标设备状态","source":"apps/rove-gui/src/App.vue"},
+    "get_settings": {"cli":"config show","gui":"设备设置读取","source":"apps/rove-gui/src/App.vue"},
+    "update_settings": {"cli":"config set","gui":"保存设备设置","source":"apps/rove-gui/src/App.vue"},
+    "get_model_config": {"cli":"model show","gui":"目标设备模型读取","source":"apps/rove-gui/src/App.vue"},
+    "set_model_config": {"cli":"model set --body -","gui":"保存模型配置","source":"apps/rove-gui/src/App.vue"},
+    "clear_model_config": {"cli":"model clear","gui":"清除模型配置","source":"apps/rove-gui/src/App.vue"},
+    "list_networks": {"cli":"network list","gui":"网络列表与分页","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "create_network": {"cli":"network create","gui":"创建网络","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "import_network": {"cli":"network join / network import","gui":"URL、扫码与手动 JSON 导入","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "get_network": {"cli":"network show","gui":"网络列表包含同一网络记录字段","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "update_network": {"cli":"network update","gui":"显式修改网络配置","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "delete_network": {"cli":"network delete","gui":"删除本机网络配置","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "start_network": {"cli":"network start","gui":"启动网络（当前返回 overlay_unavailable）","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "stop_network": {"cli":"network stop","gui":"停止网络","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "get_network_join_config": {"cli":"network export","gui":"导出配置 / 编辑前读取","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "create_network_share": {"cli":"network share","gui":"分享 URL 与二维码","source":"apps/rove-gui/src/NetworkPanel.vue"},
+    "list_network_devices": {"cli":"device list","gui":"按本机网络浏览设备（发现适配待接通）","source":"apps/rove-gui/src/DevicePicker.vue"},
+    "list_sessions": {"cli":"session list","gui":"会话列表与分页","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "create_session": {"cli":"session create","gui":"新建会话","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "get_session": {"cli":"session show","gui":"会话列表包含同一会话记录字段","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "update_session": {"cli":"session rename","gui":"修改会话标题","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "list_messages": {"cli":"session messages","gui":"历史消息与分页","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "submit_run": {"cli":"session send（支持 stdin / request_id）","gui":"发送消息、保留不确定提交的 request_id","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "list_runs": {"cli":"run list","gui":"会话作业列表与分页","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "get_run": {"cli":"run show","gui":"状态快照与输出恢复","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "cancel_run": {"cli":"run cancel","gui":"取消单个作业","source":"apps/rove-gui/src/ChatPanel.vue"},
+    "subscribe_run_events": {"cli":"run watch","gui":"SDK 有界事件批次与水位恢复","source":"crates/rove-sdk/src/subscription.rs"},
+    "list_services": {"cli":"service list","gui":"服务卡片、入口和认证说明","source":"apps/rove-gui/src/ServicePanel.vue"},
+    "publish_service": {"cli":"service publish","gui":"发布已有服务（真实网络入口待接通）","source":"apps/rove-gui/src/ServicePanel.vue"},
+    "get_service": {"cli":"service show / service open","gui":"服务列表包含同一服务记录字段","source":"apps/rove-gui/src/ServicePanel.vue"},
+    "update_service": {"cli":"service update","gui":"修改发布配置","source":"apps/rove-gui/src/ServicePanel.vue"},
+    "unpublish_service": {"cli":"service unpublish","gui":"取消发布，不卸载应用","source":"apps/rove-gui/src/ServicePanel.vue"}
+  },
+  "interface_equivalents": [
+    {"gui":"相机扫码","cli":"network join <url>","remaining":"真实相机验证"},
+    {"gui":"浏览器打开 / 复制地址","cli":"service open / service show 的地址输出","remaining":"真实浏览器和跨设备应用访问"},
+    {"gui":"从设备列表选择目标 / 手动 UUID","cli":"--network <uuid> --device <uuid>","remaining":"真实 overlay 发现、路由更新和离线状态"}
+  ]
+}
