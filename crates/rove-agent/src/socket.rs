@@ -121,10 +121,8 @@ pub async fn serve_connection(
                     let validation=AGENT.request(&request).map(|_|());
                     let id=request.path_parameters.get("run_id").cloned().unwrap_or_default();
                     let after=request.query_parameters.get("after_seq").and_then(Value::as_i64).unwrap_or(0);
-                    let initial=validation.and_then(|()|agent.events_after(&id,after));
-                    let response=match initial {
+                    let response=match validation {
                         Err(error)=>Some(Response::error(&request,error)),
-                        Ok((events,true)) if events.is_empty()=>Some(Response::new(&request,204,None)),
                         Ok(_) if subscriptions.len()>=64=>Some(Response::error(&request,ApiError::new(429,"rate_limited","Too many active subscriptions"))),
                         Ok(_)=>None,
                     };
@@ -132,12 +130,20 @@ pub async fn serve_connection(
                     let subscription=Uuid::new_v4();let cancel=CancellationToken::new();subscriptions.insert(subscription,(cancel.clone(),correlation));
                     let tx=outgoing.clone();let agent=agent.clone();
                     tasks.spawn(async move {
+                        let initial=tokio::select!{_=cancel.cancelled()=>return,value=agent.read_events(&id,after)=>value};
+                        let initial=match initial{
+                            Err(error)=>{let _=tx.send((json!(Response::error(&request,error)),Some(correlation))).await;return;},
+                            Ok((events,true)) if events.is_empty()=>{let _=tx.send((json!(Response::new(&request,204,None)),Some(correlation))).await;return;},
+                            Ok(value)=>value,
+                        };
                         let opened=Response::new(&request,200,Some(json!({"subscription_id":subscription,"run_id":id})));
                         if tx.send((json!(opened),Some(correlation))).await.is_err(){return;}
                         let mut after=after;
+                        let mut pending=Some(initial);
                         let(reason,error)=loop {
                             if cancel.is_cancelled(){break("unsubscribed",None);}
-                            let(events,done)=match agent.events_after(&id,after){Ok(v)=>v,Err(e)=>break("transport_error",Some(e))};
+                            let next=if let Some(value)=pending.take(){Ok(value)}else{tokio::select!{_=cancel.cancelled()=>break("unsubscribed",None),value=agent.read_events(&id,after)=>value}};
+                            let(events,done)=match next{Ok(v)=>v,Err(e)=>break("transport_error",Some(e))};
                             for event in events {
                                 after=event["seq"].as_i64().unwrap();
                                 if tx.send((json!({"kind":"event","subscription_id":subscription,"event":event}),None)).await.is_err(){return;}

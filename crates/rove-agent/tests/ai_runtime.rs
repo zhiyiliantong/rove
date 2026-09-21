@@ -32,8 +32,15 @@ async fn completion(
         .unwrap()
         .iter()
         .any(|m| m["role"] == "tool");
-    let tools = fake.tools && !answered;
-    let delta = if tools {
+    let management = body["messages"]
+        .to_string()
+        .contains("manage Rove with tools");
+    let tools = (fake.tools || management) && !answered;
+    let delta = if tools && management {
+        json!({"role":"assistant","tool_calls":[
+            {"index":0,"id":"call_manage","type":"function","function":{"name":"rove_api","arguments":json!({"operation_id":"update_settings","body":{"max_active_runs":2}}).to_string()}}
+        ]})
+    } else if tools {
         json!({"role":"assistant","tool_calls":[
             {"index":0,"id":"call_first","type":"function","function":{"name":"system_exec","arguments":json!({"command":"printf first; sleep 1"}).to_string()}},
             {"index":1,"id":"call_second","type":"function","function":{"name":"system_exec","arguments":json!({"command":"printf second"}).to_string()}}
@@ -143,6 +150,120 @@ async fn entered(rx: &mut mpsc::UnboundedReceiver<Value>) -> Value {
         .await
         .unwrap()
         .unwrap()
+}
+
+#[tokio::test]
+async fn selected_model_survives_default_change_and_deleted_selection_never_falls_back() {
+    let temp = tempfile::tempdir().unwrap();
+    let (base, gate, mut rx, server) = fake(false).await;
+    let agent = setup(&temp.path().join("agent"), &base).await;
+    let catalog=agent.handle(&Request::new("import_models").with_body(json!({"provider":"openai_compatible","base_url":base,"api_key":null,"models":[{"model":"chosen-a"},{"model":"chosen-b"}],"set_default":false}))).await;
+    assert_eq!(catalog.status_code, 200, "{catalog:?}");
+    let catalog = catalog.body.unwrap();
+    let model_id = catalog["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "chosen-b")
+        .unwrap()["model_id"]
+        .clone();
+    let connection_id = catalog["connections"].as_array().unwrap().last().unwrap()["connection_id"]
+        .as_str()
+        .unwrap();
+    let sid = session(&agent).await;
+    let first = Request::new("submit_run")
+        .with_path("session_id", &sid)
+        .with_body(json!({"request_id":Uuid::new_v4(),"message":"first","model_id":model_id}));
+    let running = agent.handle(&first).await;
+    assert_eq!(running.status_code, 202);
+    let running = running.body.unwrap();
+    assert_eq!(entered(&mut rx).await["model"], "chosen-b");
+    let queued = Request::new("submit_run")
+        .with_path("session_id", &sid)
+        .with_body(json!({"request_id":Uuid::new_v4(),"message":"second","model_id":model_id}));
+    let response = agent.handle(&queued).await;
+    assert_eq!(response.status_code, 202);
+    let queued_run = response.body.unwrap();
+    assert_eq!(
+        agent
+            .handle(
+                &Request::new("delete_model_connection").with_path("connection_id", connection_id)
+            )
+            .await
+            .status_code,
+        200
+    );
+    assert_eq!(agent.handle(&first).await.status_code, 200); // old request still succeeds
+    let mut conflict = first.clone();
+    conflict
+        .body
+        .as_mut()
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("model_id");
+    assert_eq!(agent.handle(&conflict).await.status_code, 409);
+    gate.add_permits(1);
+    wait_status(&agent, &running, "succeeded").await;
+    let failed = wait_status(&agent, &queued_run, "failed").await;
+    assert_eq!(failed["run"]["error"]["code"], "model_not_configured");
+    assert_eq!(
+        snapshot(&agent, &running).await["run"]["model"]["model"],
+        "chosen-b"
+    );
+    assert!(rx.try_recv().is_err());
+    agent.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn rig_management_tool_uses_api_and_persists_its_result() {
+    let temp = tempfile::tempdir().unwrap();
+    let (base, gate, mut rx, provider) = fake(false).await;
+    let agent = setup(&temp.path().join("agent"), &base).await;
+    let session_id = session(&agent).await;
+    let (_, run) = submit(
+        &agent,
+        &session_id,
+        "manage Rove with tools: set concurrency to 2",
+    )
+    .await;
+    let first = entered(&mut rx).await;
+    let preamble = first["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "system")
+        .map(Value::to_string)
+        .collect::<String>();
+    assert!(preamble.contains("get_storage_usage"));
+    assert!(preamble.contains("wait for confirmation in a later user message"));
+    assert!(preamble.contains("Live data-directory relocation is not implemented"));
+    assert!(
+        first["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["function"]["name"] == "rove_api")
+    );
+    gate.add_permits(1);
+    let followup = entered(&mut rx).await;
+    assert!(
+        followup["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "tool" && m.to_string().contains("max_active_runs"))
+    );
+    assert_eq!(agent.store.settings().unwrap()["max_active_runs"], 2);
+    gate.add_permits(1);
+    wait_status(&agent, &run, "succeeded").await;
+    let history = agent
+        .handle(&Request::new("list_messages").with_path("session_id", &session_id))
+        .await;
+    assert!(history.body.unwrap().to_string().contains("rove_api"));
+    agent.shutdown().await;
+    provider.abort();
 }
 
 #[tokio::test]

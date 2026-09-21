@@ -46,7 +46,7 @@ impl Store {
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         anyhow::ensure!(
-            version <= 2,
+            version <= 5,
             "Database was created by a newer Rove; refusing downgrade"
         );
         if version == 0 {
@@ -81,6 +81,45 @@ impl Store {
                 CREATE TABLE IF NOT EXISTS rig_messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id), run_id TEXT NOT NULL REFERENCES runs(id), message TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS run_output (run_id TEXT PRIMARY KEY REFERENCES runs(id), tail TEXT NOT NULL, truncated INTEGER NOT NULL);
                 PRAGMA user_version=2; COMMIT;")?;
+        }
+        if version < 3 {
+            if version > 0 {
+                db.backup(
+                    "main",
+                    data_dir.join(format!("rove-before-v3-{}.db", uuid::Uuid::new_v4())),
+                    None,
+                )?;
+            }
+            db.execute_batch("BEGIN IMMEDIATE;
+                CREATE TABLE IF NOT EXISTS deleted_requests (request_id TEXT PRIMARY KEY);
+                UPDATE sessions SET record=json_set(record,'$.archived_at',NULL) WHERE json_type(record,'$.archived_at') IS NULL;
+                PRAGMA user_version=3; COMMIT;")?;
+        }
+        if version < 4 {
+            if version > 0 {
+                db.backup(
+                    "main",
+                    data_dir.join(format!("rove-before-v4-{}.db", uuid::Uuid::new_v4())),
+                    None,
+                )?;
+            }
+            db.execute_batch("BEGIN IMMEDIATE;")?;
+            crate::models::migrate(&db)?;
+            db.execute_batch("PRAGMA user_version=4; COMMIT;")?;
+        }
+        if version < 5 {
+            if version > 0 {
+                db.backup(
+                    "main",
+                    data_dir.join(format!("rove-before-v5-{}.db", uuid::Uuid::new_v4())),
+                    None,
+                )?;
+            }
+            db.execute_batch("BEGIN IMMEDIATE;
+                CREATE TABLE IF NOT EXISTS session_creations (id TEXT PRIMARY KEY, request TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS remote_submissions (request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), request TEXT NOT NULL, wire TEXT NOT NULL, run_id TEXT, created_at TEXT NOT NULL, error TEXT);
+                CREATE TABLE IF NOT EXISTS remote_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), record TEXT NOT NULL, snapshot TEXT, observed_seq INTEGER NOT NULL DEFAULT 0);
+                PRAGMA user_version=5; COMMIT;")?;
         }
         db.pragma_update(None, "journal_mode", "WAL")?;
         let id: Option<String> = db
@@ -166,6 +205,119 @@ mod tests {
     }
 
     #[test]
+    fn v2_sessions_gain_archive_field_without_changing_identity_or_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("private");
+        let original = Store::open(&path).unwrap();
+        let id = original.device_id;
+        let old = json!({"session_id":"legacy", "title":"保留历史"});
+        {
+            let db = original.connection.lock().unwrap();
+            db.execute(
+                "INSERT INTO sessions (id,record) VALUES (?1,?2)",
+                rusqlite::params!["legacy", old.to_string()],
+            )
+            .unwrap();
+            db.execute_batch("DROP TABLE deleted_requests; PRAGMA user_version=2;")
+                .unwrap();
+        }
+        drop(original);
+        let migrated = Store::open(&path).unwrap();
+        assert_eq!(migrated.device_id, id);
+        let record: String = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT record FROM sessions WHERE id='legacy'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let record: Value = serde_json::from_str(&record).unwrap();
+        assert_eq!(record["title"], old["title"]);
+        assert_eq!(record.get("archived_at"), Some(&Value::Null));
+        let backup = std::fs::read_dir(&path)
+            .unwrap()
+            .map(|p| p.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("rove-before-v3-")
+            })
+            .unwrap();
+        let db = Connection::open(backup).unwrap();
+        let saved: String = db
+            .query_row("SELECT record FROM sessions WHERE id='legacy'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), old);
+        assert_eq!(
+            db.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn v4_upgrade_backs_up_and_preserves_identity_models_and_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("private");
+        let original = Store::open(&path).unwrap();
+        let id = original.device_id;
+        let session =
+            json!({"session_id":uuid::Uuid::new_v4(),"title":"existing history","device_id":id});
+        let model = json!({"connections":[{"api_key":"private-upgrade-secret"}],"models":[]});
+        original.set("model_catalog", &model).unwrap();
+        {
+            let db = original.connection.lock().unwrap();
+            db.execute(
+                "INSERT INTO sessions(id,record) VALUES(?1,?2)",
+                params![session["session_id"].as_str(), session.to_string()],
+            )
+            .unwrap();
+            db.execute_batch("DROP TABLE remote_runs; DROP TABLE remote_submissions; DROP TABLE session_creations; PRAGMA user_version=4;").unwrap();
+        }
+        drop(original);
+        let migrated = Store::open(&path).unwrap();
+        assert_eq!(migrated.device_id, id);
+        assert_eq!(migrated.get("model_catalog").unwrap().unwrap(), model);
+        let saved: String = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT record FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), session);
+        let backup = std::fs::read_dir(&path)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("rove-before-v5-")
+            })
+            .unwrap();
+        let before = Connection::open(backup).unwrap();
+        assert_eq!(
+            before
+                .pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            migrated
+                .connection
+                .lock()
+                .unwrap()
+                .pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            5
+        );
+    }
+
+    #[test]
     fn migration_backs_up_existing_database_and_rejects_future_schema() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("private");
@@ -204,7 +356,7 @@ mod tests {
             .connection
             .lock()
             .unwrap()
-            .pragma_update(None, "user_version", 3)
+            .pragma_update(None, "user_version", 6)
             .unwrap();
         drop(migrated);
         assert!(Store::open(&path).is_err());

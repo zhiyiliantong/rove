@@ -98,4 +98,4 @@ npm test --prefix apps/rove-gui
 
 `Cargo.lock`、GUI 的 `package-lock.json` 固定解析版本；默认 Cargo 成员不包括 GUI 原生壳，因此无界面环境可以单独构建和测试。
 
-需求、设计、接口与进度见 [bootstrap-rove](openspec/changes/bootstrap-rove/README.md) 和 [任务列表](openspec/changes/bootstrap-rove/tasks.md)。实际验证范围见 [实现记录](docs/implementation-status.md)。
+首版阶段需求与设计已归档，见 [bootstrap-rove](openspec/changes/archive/2026-09-21-bootstrap-rove/README.md) 和 [归档任务列表](openspec/changes/archive/2026-09-21-bootstrap-rove/tasks.md)。现行行为契约见 [主规格](openspec/specs/)，现行接口见 [api](api/README.md)。后续按 [小提案计划](docs/next-iterations.md) 迭代；实际验证范围见 [实现记录](docs/implementation-status.md)。

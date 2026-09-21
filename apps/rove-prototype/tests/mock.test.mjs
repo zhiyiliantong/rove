@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import Ajv from 'ajv/dist/2020.js';
 import { createMockApi, seed, exportCard, parseCard, cardUrl, validateCard, validateEndpoint } from '../src/mock.ts';
 const contract = JSON.parse(readFileSync(new URL('../api/prototype.openapi.json', import.meta.url)));
-const original = JSON.parse(readFileSync(new URL('../../../openspec/changes/bootstrap-rove/api/rove-agent.openapi.json', import.meta.url)));
+const original = JSON.parse(readFileSync(new URL('../../../api/rove-agent.openapi.json', import.meta.url)));
 const validate = new Ajv({ strict: false }).compile({ $ref: '#/components/schemas/Snapshot', components: contract.components });
 function harness() { let time = 1000; let saved = ''; const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; } }; const api = createMockApi(storage, () => time); return { api, storage, clock: () => time, advance: ms => { time += ms; }, stored: () => saved }; }
 test('all mock fixtures validate against standalone OpenAPI, using existing run states', () => { for (const scene of ['daily','empty','offline','failure','unsupported']) assert.ok(validate(seed(scene)), JSON.stringify(validate.errors)); assert.deepEqual(contract.components.schemas.RunStatus.enum, original.components.schemas.RunStatus.enum); const operations = Object.values(contract.paths).flatMap(p => Object.values(p).map(v => v.operationId)); assert.equal(new Set(operations).size, 25); });

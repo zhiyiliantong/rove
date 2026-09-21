@@ -2,8 +2,8 @@
 
 use easytier::{common::config::ConfigLoader, proto::api::manage::NetworkConfig};
 
-// Pin upstream DHCP behavior. Rove now delegates addressing to DHCP without a
-// requested subnet; this observation no longer blocks the single-network design.
+// Pin both independent modes: DHCP owns its pool; static mode uses host/prefix.
+// Simultaneous networks are admitted only when actual subnets do not overlap.
 #[test]
 fn upstream_dhcp_discards_requested_subnet() {
     let mut requested = NetworkConfig {

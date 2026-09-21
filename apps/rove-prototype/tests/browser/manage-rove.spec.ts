@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { seed } from '../../src/mock';
 import { manageRovePrompt } from '../../src/conversation-prompts';
 
@@ -9,7 +9,7 @@ for (const width of [320, 1440]) {
     state.sessions[0]!.draft = '保留我的旧草稿';
     state.sessions[0]!.target_device_id = 'windows';
     await page.addInitScript(snapshot => {
-      if (!localStorage.getItem('rove-prototype-v1')) localStorage.setItem('rove-prototype-v1', JSON.stringify(snapshot));
+      if (!sessionStorage.getItem('custom-fixture')) { localStorage.setItem('rove-prototype-v1', JSON.stringify(snapshot)); sessionStorage.setItem('custom-fixture', '1'); }
     }, state);
     await page.goto('/#/sessions/welcome');
     await page.getByRole('button', { name: /^管理 Rove/ }).click();

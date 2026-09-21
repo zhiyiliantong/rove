@@ -1,6 +1,6 @@
 {
   "name":"rove-gui","version":"0.1.0","private":true,"type":"module",
-  "scripts":{"dev":"vite --host 127.0.0.1 --port 1420 --strictPort","build":"vue-tsc --noEmit && vite build","test":"node --experimental-strip-types --test tests/*.test.mjs","tauri":"tauri"},
-  "dependencies":{"vue":"3.5.42","@tauri-apps/api":"2.11.1","@tauri-apps/plugin-opener":"2.5.5","jsqr":"1.4.0"},
-  "devDependencies":{"@tauri-apps/cli":"2.11.4","@vitejs/plugin-vue":"6.0.8","vite":"8.2.2","typescript":"5.9.3","vue-tsc":"3.3.11"}
+  "scripts":{"dev":"vite --host 127.0.0.1 --port 1420 --strictPort","build":"vue-tsc --noEmit && vite build","test":"node --experimental-strip-types --test tests/*.test.mjs","test:e2e":"playwright test","tauri":"tauri"},
+  "dependencies":{"vue":"3.5.42","vue-i18n":"11.4.12","@tauri-apps/api":"2.11.1","@tauri-apps/plugin-opener":"2.5.5","jsqr":"1.4.0","primevue":"4.5.5","@primeuix/themes":"1.2.5","primeicons":"7.0.0","markdown-it":"15.0.2","katex":"0.18.7"},
+  "devDependencies":{"@tauri-apps/cli":"2.11.4","@vitejs/plugin-vue":"6.0.8","vite":"8.2.2","typescript":"5.9.3","vue-tsc":"3.3.11","@playwright/test":"1.63.0","@types/node":"22.19.15"}
 }

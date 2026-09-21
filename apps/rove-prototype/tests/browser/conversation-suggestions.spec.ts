@@ -1,11 +1,11 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 for (const width of [390, 1440]) {
   test(`conversation suggestions fill drafts without execution at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/#/sessions');
-    await expect(page.locator('.data-slogan')).toHaveText('数据自己掌握，跳出平台控制');
-    await expect(page.locator('.data-slogan')).toBeVisible();
+    await page.getByRole('button', { name: '全局添加' }).click();
+    await page.getByRole('menuitem', { name: '新会话', exact: true }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     const suggestions = page.getByRole('group', { name: '会话建议' });
     await expect(suggestions.getByRole('button')).toHaveCount(5);
@@ -24,7 +24,7 @@ for (const width of [390, 1440]) {
     await expect(suggestions).toHaveCount(0);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('rove-prototype-v1')!).runs.length)).toBe(1);
     await page.getByRole('button', { name: '全局添加' }).click();
-    await page.getByRole('menuitem', { name: '添加会话', exact: true }).click();
+    await page.getByRole('menuitem', { name: '新会话', exact: true }).click();
     await expect(input).toHaveValue('');
     await expect(suggestions.getByRole('button', { name: /管理多台代码代理/ })).toBeVisible();
   });

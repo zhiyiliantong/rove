@@ -5,6 +5,19 @@ async fn agent_call(
 ) -> Result<rove_protocol::Response, String> {
     client.call(request).await.map_err(|e| e.to_string())
 }
+
+// Called by MainActivity before Tauri starts the embedded agent. Initialize the
+// same verifier version used by reqwest, with the application class loader.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_rove_desktop_MainActivity_initializeTls<'local>(
+    mut env: jni::EnvUnowned<'local>,
+    _activity: jni::objects::JObject<'local>,
+    context: jni::objects::JObject<'local>,
+) {
+    env.with_env(|env| rustls_platform_verifier::android::init_with_env(env, context))
+        .resolve::<jni::errors::ThrowRuntimeExAndDefault>();
+}
 #[tauri::command]
 fn share_qr(url: String) -> Result<String, String> {
     rove_sdk::ShareQr::new(&url)

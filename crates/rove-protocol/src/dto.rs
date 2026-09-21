@@ -135,10 +135,8 @@ mod tests {
                 }
             }
         }
-        let fixtures: Value = serde_json::from_str(include_str!(
-            "../../../openspec/changes/bootstrap-rove/api/contract-examples.json"
-        ))
-        .unwrap();
+        let fixtures: Value =
+            serde_json::from_str(include_str!("../../../api/contract-examples.json")).unwrap();
         for case in fixtures["cases"].as_array().unwrap() {
             let name = case["schema"].as_str().unwrap();
             let value = case["value"].clone();

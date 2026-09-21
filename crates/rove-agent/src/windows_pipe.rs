@@ -144,6 +144,50 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
+    async fn anonymous_account_cannot_open_owner_only_named_pipe() {
+        use windows_sys::Win32::{
+            Security::{ImpersonateAnonymousToken, RevertToSelf},
+            System::Threading::GetCurrentThread,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let path = rove_sdk::socket_path(temp.path());
+        let sddl = current_user_sddl().unwrap();
+        let descriptor = String::from_utf16_lossy(&sddl[..sddl.len() - 1]);
+        // A protected DACL with exactly one allow ACE for the process user SID;
+        // no inherited Everyone, Authenticated Users or Administrators entry.
+        assert!(descriptor.starts_with("D:P(A;;GA;;;S-1-"));
+        assert_eq!(descriptor.matches('(').count(), 1);
+        let listener = create(&path, &sddl, true).unwrap();
+        let denied = std::thread::spawn(move || {
+            struct Revert;
+            impl Drop for Revert {
+                fn drop(&mut self) {
+                    // SAFETY: this disposable thread holds only our anonymous
+                    // impersonation token; it never returns to an async pool.
+                    assert_ne!(unsafe { RevertToSelf() }, 0);
+                }
+            }
+            // SAFETY: pseudo handle refers to this live, dedicated test thread.
+            assert_ne!(unsafe { ImpersonateAnonymousToken(GetCurrentThread()) }, 0);
+            let _revert = Revert;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)
+                .err()
+        })
+        .join()
+        .unwrap()
+        .expect("Anonymous token unexpectedly opened the pipe");
+        assert_eq!(
+            denied.raw_os_error(),
+            Some(5),
+            "Expected ERROR_ACCESS_DENIED"
+        );
+        drop(listener);
+    }
+
+    #[tokio::test]
     async fn current_account_clients_share_state_and_pipe_name_cannot_be_taken_over() {
         let temp = tempfile::tempdir().unwrap();
         let agent = Agent::open(&temp.path().join("agent")).unwrap();

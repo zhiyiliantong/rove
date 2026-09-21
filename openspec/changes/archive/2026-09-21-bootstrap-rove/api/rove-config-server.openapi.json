@@ -1,0 +1,397 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rove Configuration Blob API",
+    "version": "0.1.0",
+    "description": "匿名密文存储规划契约。服务不接收入网明文或解密密钥，不维护设备、网络成员或账号。上传成功起七天可重复下载；到期不撤销已加入成员。"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "https://{config_host}",
+      "variables": {
+        "config_host": {
+          "default": "config.example.com"
+        }
+      }
+    }
+  ],
+  "security": [],
+  "tags": [
+    {
+      "name": "blobs",
+      "description": "版本化密文的暂存与下载"
+    }
+  ],
+  "paths": {
+    "/v1/blobs": {
+      "post": {
+        "operationId": "upload_blob",
+        "tags": [
+          "blobs"
+        ],
+        "summary": "上传已在客户端加密的配置",
+        "description": "仅存 envelope。服务验证编码、长度与格式但无法解密。新生成随机 blob_id，expires_at=created_at+604800秒；不提供覆盖。总 HTTP body 超过262144字节返回413。非幂等，响应丢失后重试会创建独立 blob。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlobUpload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "密文已持久保存，返回不含密钥的分享地址",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/blobs/{blob_id}": {
+      "get": {
+        "operationId": "download_blob",
+        "tags": [
+          "blobs"
+        ],
+        "summary": "下载未过期密文",
+        "description": "无副作用，可重复下载。到期尚未清理返回410 share_expired；不存在或已经清理返回404 blob_not_found。URL fragment 不作为 HTTP 请求的一部分，服务不执行解密脚本。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BlobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回密文与到期信息",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/c/{blob_id}": {
+      "get": {
+        "operationId": "download_shared_blob",
+        "tags": [
+          "blobs"
+        ],
+        "summary": "分享 URL 的密文下载别名",
+        "description": "无副作用，可重复下载。到期尚未清理返回410 share_expired；不存在或已经清理返回404 blob_not_found。URL fragment 不作为 HTTP 请求的一部分，服务不执行解密脚本。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BlobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回密文与到期信息",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blob"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CipherEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "algorithm",
+          "nonce",
+          "ciphertext"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "algorithm": {
+            "type": "string",
+            "const": "aes-256-gcm"
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{16}$",
+            "description": "12 字节 nonce 的无 padding base64url"
+          },
+          "ciphertext": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "minLength": 22,
+            "maxLength": 174784,
+            "description": "AES-GCM 密文后拼接 16 字节 tag，再无 padding base64url。解码后最多 131072 字节。固定 AAD 为 UTF-8 rove.network_join_config.v1；明文为 Agent OpenAPI 的 JoinConfig。"
+          }
+        },
+        "examples": [
+          {
+            "schema_version": 1,
+            "algorithm": "aes-256-gcm",
+            "nonce": "AgICAgICAgICAgIC",
+            "ciphertext": "fPS6KiIyrJyMutm6L86t3ICP4MPJ3-gFquiSkCeSEF1NXS4HXV-T33cef9mvF2xWnkXu54pi7Rb7boOCUwR9ukTUodKU-z9EUzMmy5BwCVhUGTpMLooOp2PToi7m7TapzaL32Bp6Vf2BFjALZb2w70hnqH9szpmIMDLfykChDsNYQXdRqa4u_k2tYzF94Yg2j91TrqOuVy9iVmj01lQgon7WslLKobmU3OplLJ0vJXv3MOTzcdWSdTyzS5P9LXomUgUBDVkU40E0jELvysfSj4DgoQvRMb7NbCT5RE7fp3aoVcqBcfDox0UDqWU4lsnbxWRV0R9z4TYUNSzqMS9rLqmeAPgDFMqn-mVt2Nh-uLTnMETkf1fh8Du5yOM0q5rE2Ifqt97L3UH6ZVw7MgylPuM"
+          }
+        ]
+      },
+      "BlobUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "envelope"
+        ],
+        "properties": {
+          "envelope": {
+            "$ref": "#/components/schemas/CipherEnvelope"
+          }
+        },
+        "examples": [
+          {
+            "envelope": {
+              "schema_version": 1,
+              "algorithm": "aes-256-gcm",
+              "nonce": "AgICAgICAgICAgIC",
+              "ciphertext": "fPS6KiIyrJyMutm6L86t3ICP4MPJ3-gFquiSkCeSEF1NXS4HXV-T33cef9mvF2xWnkXu54pi7Rb7boOCUwR9ukTUodKU-z9EUzMmy5BwCVhUGTpMLooOp2PToi7m7TapzaL32Bp6Vf2BFjALZb2w70hnqH9szpmIMDLfykChDsNYQXdRqa4u_k2tYzF94Yg2j91TrqOuVy9iVmj01lQgon7WslLKobmU3OplLJ0vJXv3MOTzcdWSdTyzS5P9LXomUgUBDVkU40E0jELvysfSj4DgoQvRMb7NbCT5RE7fp3aoVcqBcfDox0UDqWU4lsnbxWRV0R9z4TYUNSzqMS9rLqmeAPgDFMqn-mVt2Nh-uLTnMETkf1fh8Du5yOM0q5rE2Ifqt97L3UH6ZVw7MgylPuM"
+            }
+          }
+        ]
+      },
+      "Blob": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blob_id",
+          "envelope",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "blob_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/CipherEnvelope"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "examples": [
+          {
+            "blob_id": "0123456789abcdef0123456789abcdef",
+            "envelope": {
+              "schema_version": 1,
+              "algorithm": "aes-256-gcm",
+              "nonce": "AgICAgICAgICAgIC",
+              "ciphertext": "fPS6KiIyrJyMutm6L86t3ICP4MPJ3-gFquiSkCeSEF1NXS4HXV-T33cef9mvF2xWnkXu54pi7Rb7boOCUwR9ukTUodKU-z9EUzMmy5BwCVhUGTpMLooOp2PToi7m7TapzaL32Bp6Vf2BFjALZb2w70hnqH9szpmIMDLfykChDsNYQXdRqa4u_k2tYzF94Yg2j91TrqOuVy9iVmj01lQgon7WslLKobmU3OplLJ0vJXv3MOTzcdWSdTyzS5P9LXomUgUBDVkU40E0jELvysfSj4DgoQvRMb7NbCT5RE7fp3aoVcqBcfDox0UDqWU4lsnbxWRV0R9z4TYUNSzqMS9rLqmeAPgDFMqn-mVt2Nh-uLTnMETkf1fh8Du5yOM0q5rE2Ifqt97L3UH6ZVw7MgylPuM"
+            },
+            "created_at": "2026-09-07T00:00:00Z",
+            "expires_at": "2026-09-14T00:00:00Z"
+          }
+        ]
+      },
+      "BlobCreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blob_id",
+          "download_url",
+          "share_base_url",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "blob_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "download_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "share_base_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "https://host/c/blob_id，不含密钥；agent 本机追加 #key=<43字符base64url>"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "examples": [
+          {
+            "blob_id": "0123456789abcdef0123456789abcdef",
+            "download_url": "https://config.example.com/v1/blobs/0123456789abcdef0123456789abcdef",
+            "share_base_url": "https://config.example.com/c/0123456789abcdef0123456789abcdef",
+            "created_at": "2026-09-07T00:00:00Z",
+            "expires_at": "2026-09-14T00:00:00Z"
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "BlobId": {
+        "name": "blob_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "invalid_request、payload_too_large、blob_not_found、share_expired、rate_limited 或 storage_unavailable。错误响应与成功响应均 no-store。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

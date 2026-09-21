@@ -1,27 +1,366 @@
 {
-  "scope": "Linux 本机验收；多个私有目录与回环代理不等于真实多设备 overlay。partial 表示该需求仍有未交付部分。",
+  "scope": "2026-09-18：新版 Ubuntu/Android 安装包、真实 Linux WebKit/systemd 生命周期、两宿主 overlay、Windows 原生管道、Android WebView 分层记录；partial 保留未完成平台和会员适配，不将夹具等同于任意应用/所有平台验收。",
   "requirements": {
-    "FR-01": {"stories":["US-01","US-12","US-15"],"specs":["device-runtime"],"operations":["get_hello","get_device"],"evidence":["crates/rove-agent/tests/local_runtime.rs","scripts/check-cli-tty.py"],"status":"partial","remaining":"原生安装包、OS 服务注册和移动嵌入核心"},
-    "FR-02": {"stories":["US-01","US-04"],"specs":["overlay-network"],"operations":["list_networks","create_network","get_network","update_network","delete_network","start_network","stop_network","get_network_join_config"],"evidence":["crates/rove-agent/tests/local_runtime.rs","crates/rove-agent/tests/easytier_contract.rs","docs/easytier-addressing.md"],"status":"partial","remaining":"DHCP/CIDR 设计决策、真实多实例启停和路由冲突检测"},
-    "FR-03": {"stories":["US-02","US-03","US-13"],"specs":["network-sharing"],"operations":["import_network","create_network_share","upload_blob","download_blob","download_shared_blob"],"evidence":["crates/rove-agent/tests/sharing_workflow.rs","crates/rove-sdk/src/qr.rs","services/rove-config-server/src/lib.rs"],"status":"partial","remaining":"真实相机与移动平台扫码验收、公网部署"},
-    "FR-04": {"stories":["US-04","US-05"],"specs":["overlay-network","agent-communication"],"operations":["list_network_devices"],"evidence":["crates/rove-sdk/tests/remote.rs","apps/rove-cli/tests/cli.rs"],"status":"partial","remaining":"EasyTier peer/hello 发现、地址刷新、实际远端调用"},
-    "FR-05": {"stories":["US-05"],"specs":["ai-sessions"],"operations":["get_model_config","set_model_config","clear_model_config"],"evidence":["crates/rove-agent/src/store.rs","apps/rove-cli/tests/cli.rs","scripts/check-cli-tty.py"],"status":"partial","remaining":"真实远端模型设置与运行快照验收"},
-    "FR-06": {"stories":["US-06","US-07"],"specs":["ai-sessions"],"operations":["get_settings","update_settings","list_sessions","create_session","get_session","update_session","list_messages","submit_run","list_runs"],"evidence":["crates/rove-agent/tests/ai_runtime.rs","crates/rove-agent/src/session_tests.rs"],"status":"partial","remaining":"真实远端继续会话和多窗口验收"},
-    "FR-07": {"stories":["US-08","US-09","US-14"],"specs":["ai-sessions","agent-communication"],"operations":["get_run","cancel_run","subscribe_run_events"],"evidence":["crates/rove-agent/tests/ai_runtime.rs","crates/rove-agent/src/tool_tests.rs","crates/rove-sdk/tests/subscription.rs","apps/rove-gui/tests/run-events.test.mjs"],"status":"partial","remaining":"真实 overlay SSE 和 Windows 子进程树取消"},
-    "FR-08": {"stories":["US-06","US-10","US-15"],"specs":["ai-sessions"],"operations":["submit_run","publish_service"],"evidence":["crates/rove-agent/src/tool_tests.rs","crates/rove-agent/src/service_tests.rs"],"status":"partial","remaining":"真实模型装配验收、平台 native 能力"},
-    "FR-09": {"stories":["US-10","US-11","US-14"],"specs":["service-publishing"],"operations":["list_services","publish_service","get_service","update_service","unpublish_service"],"evidence":["crates/rove-agent/src/service_tests.rs","apps/rove-cli/tests/cli.rs"],"status":"partial","remaining":"真实 overlay 入口、网络恢复/地址变化后的自动重建、跨设备浏览器访问"},
-    "FR-10": {"stories":["US-12"],"specs":["user-interfaces"],"operations":[],"evidence":["apps/rove-cli/tests/cli.rs","scripts/check-cli-tty.py","apps/rove-gui/tests/run-events.test.mjs","apps/rove-gui/tests/run-pages.test.mjs","apps/rove-gui/tests/service-address.test.mjs","apps/rove-gui/src-tauri/src/tests.rs","scripts/check-native-gui.py"],"status":"partial","remaining":"真实 WebView、多窗口与浏览器打开验收、逐项能力对等"},
-    "FR-11": {"stories":["US-16"],"specs":["agent-communication"],"operations":[],"evidence":["scripts/check-contracts.py","crates/rove-protocol/src/contract.rs","crates/rove-protocol/build.rs","crates/rove-protocol/src/dto.rs","crates/rove-protocol/src/frame.rs","crates/rove-sdk/src/local_deadline_tests.rs"],"status":"partial","remaining":"全部 HTTP/SSE 实现对照与真实远端验证"}
+    "FR-01": {
+      "stories": [
+        "US-01",
+        "US-12",
+        "US-15"
+      ],
+      "specs": [
+        "device-runtime"
+      ],
+      "operations": [
+        "get_hello",
+        "get_storage_usage",
+        "get_device"
+      ],
+      "evidence": [
+        "crates/rove-agent/tests/local_runtime.rs",
+        "scripts/check-cli-tty.py",
+        "crates/rove-agent/src/storage_usage.rs",
+        "scripts/check-linux-desktop.py",
+        "docs/platform-support.md"
+      ],
+      "status": "partial",
+      "remaining": "Windows/macOS 安装器与 OS 服务生命周期、iOS 嵌入核心验证；Ubuntu 原生窗口/systemd 联合验证已通过"
+    },
+    "FR-02": {
+      "stories": [
+        "US-01",
+        "US-04"
+      ],
+      "specs": [
+        "overlay-network"
+      ],
+      "operations": [
+        "list_networks",
+        "create_network",
+        "get_network",
+        "update_network",
+        "delete_network",
+        "start_network",
+        "stop_network",
+        "get_network_join_config",
+        "test_network_peer"
+      ],
+      "evidence": [
+        "crates/rove-agent/tests/local_runtime.rs",
+        "crates/rove-agent/tests/easytier_contract.rs",
+        "docs/easytier-addressing.md",
+        "scripts/check-two-host-overlay.py",
+        "scripts/check-multinetwork.py",
+        "docs/multinetwork.md"
+      ],
+      "status": "partial",
+      "remaining": "跨平台网络适配；Linux 自动/手动与双网实际 TUN 隔离验收已通过"
+    },
+    "FR-03": {
+      "stories": [
+        "US-02",
+        "US-03",
+        "US-13"
+      ],
+      "specs": [
+        "network-sharing"
+      ],
+      "operations": [
+        "import_network",
+        "create_network_share",
+        "upload_blob",
+        "download_blob",
+        "download_shared_blob"
+      ],
+      "evidence": [
+        "crates/rove-agent/tests/sharing_workflow.rs",
+        "crates/rove-sdk/src/qr.rs",
+        "services/rove-config-server/src/lib.rs",
+        "apps/rove-gui/tests/network-import.test.mjs",
+        "apps/rove-gui/tests/browser/app.spec.mjs"
+      ],
+      "status": "partial",
+      "remaining": "真实相机与移动平台扫码验收、公网部署"
+    },
+    "FR-04": {
+      "stories": [
+        "US-04",
+        "US-05"
+      ],
+      "specs": [
+        "overlay-network",
+        "agent-communication"
+      ],
+      "operations": [
+        "list_network_devices"
+      ],
+      "evidence": [
+        "crates/rove-sdk/tests/remote.rs",
+        "apps/rove-cli/tests/cli.rs",
+        "docs/two-host-acceptance.md"
+      ],
+      "status": "partial",
+      "remaining": "Windows/macOS 原生网络及移动 native VPN；Linux 真实发现与远端调用已验证"
+    },
+    "FR-05": {
+      "stories": [
+        "US-05"
+      ],
+      "specs": [
+        "ai-sessions"
+      ],
+      "operations": [
+        "get_model_config",
+        "set_model_config",
+        "clear_model_config",
+        "get_model_catalog",
+        "import_models",
+        "sync_model_connection",
+        "receive_model_sync",
+        "rename_model",
+        "set_default_model",
+        "update_model_connection",
+        "delete_model_connection",
+        "discover_models",
+        "test_model"
+      ],
+      "evidence": [
+        "crates/rove-agent/src/store.rs",
+        "apps/rove-cli/tests/cli.rs",
+        "scripts/check-cli-tty.py",
+        "crates/rove-agent/tests/model_catalog.rs",
+        "crates/rove-agent/src/model_sync_tests.rs",
+        "docs/model-sync.md",
+        "apps/rove-gui/src/ModelPanel.vue",
+        "docs/two-host-acceptance.md"
+      ],
+      "status": "partial",
+      "remaining": "正式会员授权适配；两 Linux 宿主模型配置与快照已测，不代表付费提供方或全部平台实测"
+    },
+    "FR-06": {
+      "stories": [
+        "US-06",
+        "US-07"
+      ],
+      "specs": [
+        "ai-sessions"
+      ],
+      "operations": [
+        "get_settings",
+        "update_settings",
+        "list_sessions",
+        "create_session",
+        "get_session",
+        "update_session",
+        "list_messages",
+        "submit_run",
+        "list_runs",
+        "archive_session",
+        "restore_session",
+        "delete_session",
+        "list_session_submissions"
+      ],
+      "evidence": [
+        "crates/rove-agent/tests/ai_runtime.rs",
+        "crates/rove-agent/src/session_tests.rs",
+        "crates/rove-agent/tests/archive_workflow.rs",
+        "crates/rove-agent/src/remote_sessions.rs"
+      ],
+      "status": "partial",
+      "remaining": "跨平台原生多窗口和长时离线复验；两宿主本机归属远端作业已通过"
+    },
+    "FR-07": {
+      "stories": [
+        "US-08",
+        "US-09",
+        "US-14"
+      ],
+      "specs": [
+        "ai-sessions",
+        "agent-communication"
+      ],
+      "operations": [
+        "get_run",
+        "cancel_run",
+        "subscribe_run_events"
+      ],
+      "evidence": [
+        "crates/rove-agent/tests/ai_runtime.rs",
+        "crates/rove-agent/src/tool_tests.rs",
+        "crates/rove-sdk/tests/subscription.rs",
+        "apps/rove-gui/tests/run-events.test.mjs"
+      ],
+      "status": "partial",
+      "remaining": "Windows 子进程树取消原生复验；Linux 真实跨宿主 overlay SSE 已通过"
+    },
+    "FR-08": {
+      "stories": [
+        "US-06",
+        "US-10",
+        "US-15"
+      ],
+      "specs": [
+        "ai-sessions"
+      ],
+      "operations": [
+        "submit_run",
+        "publish_service"
+      ],
+      "evidence": [
+        "crates/rove-agent/src/tool_tests.rs",
+        "crates/rove-agent/src/service_tests.rs"
+      ],
+      "status": "partial",
+      "remaining": "供应商智能决策与任意应用兼容性不由可控模型验收代替；跨平台 native 能力"
+    },
+    "FR-09": {
+      "stories": [
+        "US-10",
+        "US-11",
+        "US-14"
+      ],
+      "specs": [
+        "service-publishing"
+      ],
+      "operations": [
+        "list_services",
+        "publish_service",
+        "get_service",
+        "update_service",
+        "unpublish_service"
+      ],
+      "evidence": [
+        "crates/rove-agent/src/service_tests.rs",
+        "apps/rove-cli/tests/cli.rs",
+        "docs/two-host-acceptance.md"
+      ],
+      "status": "partial",
+      "remaining": "原生浏览器打开与其他平台网络；Linux 两宿主应用认证、停网恢复、取消发布保留应用已通过"
+    },
+    "FR-10": {
+      "stories": [
+        "US-12"
+      ],
+      "specs": [
+        "user-interfaces"
+      ],
+      "operations": [],
+      "evidence": [
+        "apps/rove-cli/tests/cli.rs",
+        "scripts/check-cli-tty.py",
+        "apps/rove-gui/tests/run-events.test.mjs",
+        "apps/rove-gui/tests/run-pages.test.mjs",
+        "apps/rove-gui/tests/service-address.test.mjs",
+        "apps/rove-gui/src-tauri/src/tests.rs",
+        "scripts/check-native-gui.py",
+        "scripts/check-linux-desktop.py",
+        "apps/rove-gui/tests/rich-text.test.mjs",
+        "apps/rove-gui/tests/navigation.test.mjs",
+        "apps/rove-gui/tests/browser/app.spec.mjs",
+        "docs/gui-prototype-migration.md"
+      ],
+      "status": "partial",
+      "remaining": "物理相机/系统朗读/原生浏览器与其余平台实测；Ubuntu/Android 最新增量已打包，等待用户核心功能验收"
+    },
+    "FR-11": {
+      "stories": [
+        "US-16"
+      ],
+      "specs": [
+        "agent-communication"
+      ],
+      "operations": [],
+      "evidence": [
+        "scripts/check-contracts.py",
+        "crates/rove-protocol/src/contract.rs",
+        "crates/rove-protocol/build.rs",
+        "crates/rove-protocol/src/dto.rs",
+        "crates/rove-protocol/src/frame.rs",
+        "crates/rove-sdk/src/local_deadline_tests.rs"
+      ],
+      "status": "partial",
+      "remaining": "新增平台传输复验；45 项 agent 操作 Socket/HTTP 对照及 Linux 真实远端 SSE 已测"
+    }
   },
   "quality": {
-    "NFR-01":{"requirements":["FR-01","FR-03","FR-10"],"status":"partial","remaining":"干净安装和实际组网"},
-    "NFR-02":{"requirements":["FR-01","FR-06","FR-07","FR-09"],"status":"partial","remaining":"真实地址变化与服务自动恢复"},
-    "NFR-03":{"requirements":["FR-06"],"status":"verified_local","remaining":"跨平台复验"},
-    "NFR-04":{"requirements":["FR-03","FR-06","FR-07","FR-08","FR-11"],"status":"partial","remaining":"长时间负载、远端 SSE 和总资源配额"},
-    "NFR-05":{"requirements":["FR-01","FR-03","FR-07"],"status":"partial","remaining":"原生 GUI 与 OS 服务生命周期"},
-    "NFR-06":{"requirements":["FR-01","FR-04","FR-09"],"status":"partial","remaining":"物理网卡拒绝、真实 overlay 正向、Windows 同账号 ACL"},
-    "NFR-07":{"requirements":["FR-01","FR-08","FR-10"],"status":"not_verified","remaining":"Windows/macOS/Android/iOS 构建和运行"},
-    "NFR-08":{"requirements":["FR-07","FR-08","FR-09"],"status":"partial","remaining":"跨设备与跨平台真实失败验收"},
-    "NFR-09":{"requirements":["FR-11"],"status":"verified_local","remaining":"实现覆盖仍按 FR-11 标注，不代表远端端点已交付"}
+    "NFR-01": {
+      "requirements": [
+        "FR-01",
+        "FR-03",
+        "FR-10"
+      ],
+      "status": "partial",
+      "remaining": "跨平台首次使用和真实桌面生命周期；Linux 隔离安装与两宿主组网已测"
+    },
+    "NFR-02": {
+      "requirements": [
+        "FR-01",
+        "FR-06",
+        "FR-07",
+        "FR-09"
+      ],
+      "status": "partial",
+      "remaining": "跨平台地址变化复验；Linux 两宿主停网后原端口恢复已测"
+    },
+    "NFR-03": {
+      "requirements": [
+        "FR-06"
+      ],
+      "status": "verified_local",
+      "remaining": "跨平台复验"
+    },
+    "NFR-04": {
+      "requirements": [
+        "FR-03",
+        "FR-06",
+        "FR-07",
+        "FR-08",
+        "FR-11"
+      ],
+      "status": "partial",
+      "remaining": "长时间负载与总资源配额；Linux 两宿主远端 SSE 已测"
+    },
+    "NFR-05": {
+      "requirements": [
+        "FR-01",
+        "FR-03",
+        "FR-07"
+      ],
+      "status": "partial",
+      "remaining": "原生 GUI 与 OS 服务生命周期"
+    },
+    "NFR-06": {
+      "requirements": [
+        "FR-01",
+        "FR-04",
+        "FR-09"
+      ],
+      "status": "partial",
+      "remaining": "其他平台网络入口隔离；Linux overlay 正向/物理入口拒绝及 Windows 同账号管道/匿名拒绝已有证据"
+    },
+    "NFR-07": {
+      "requirements": [
+        "FR-01",
+        "FR-08",
+        "FR-10"
+      ],
+      "status": "not_verified",
+      "remaining": "macOS/iOS 原生构建运行、Windows 网络服务/安装器；Android APK 与 Windows 管道已原生测试"
+    },
+    "NFR-08": {
+      "requirements": [
+        "FR-07",
+        "FR-08",
+        "FR-09"
+      ],
+      "status": "partial",
+      "remaining": "其余平台真实失败验收；两 Linux 宿主停网/恢复与 Android unsupported 已测"
+    },
+    "NFR-09": {
+      "requirements": [
+        "FR-11"
+      ],
+      "status": "verified_local",
+      "remaining": "实现覆盖仍按 FR-11 与平台矩阵标注，不外推至未实现的平台网络"
+    }
   }
 }

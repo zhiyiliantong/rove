@@ -59,8 +59,8 @@ export function validateEndpoint(url: string) {
   catch { throw new Error('接口地址需要 http(s) 基础地址，不应包含账号、密钥、查询参数或片段。'); }
 }
 
-export function createMockApi(storage?: Pick<Storage, 'getItem' | 'setItem'>, now = () => Date.now()): PrototypeApi {
-  let state = seed('daily');
+export function createMockApi(storage?: Pick<Storage, 'getItem' | 'setItem'>, now = () => Date.now(), initialScenario: Scenario = 'daily'): PrototypeApi {
+  let state = seed(initialScenario);
   try { const saved = storage?.getItem(STORAGE_KEY); if (saved) { const s = JSON.parse(saved); if ([1, 2, 3, 4].includes(s.version) && Array.isArray(s.sessions) && Array.isArray(s.runs) && Array.isArray(s.models) && Array.isArray(s.connections) && Array.isArray(s.networks) && Array.isArray(s.devices) && Array.isArray(s.services)) {
     if (s.version === 1) {
       for (const n of s.networks) Object.assign(n, { connection_status: n.id === s.active_network_id ? 'connected' : 'disconnected', resolved_subnet: n.id === s.active_network_id ? cidrRange(n.subnet).cidr : null, local_ip: n.id === s.active_network_id ? '自动分配（旧演示）' : null, connection_error: null, connect_started_at: null });

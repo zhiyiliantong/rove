@@ -1,4 +1,4 @@
-//! Linux single-network lifecycle. Requests persist intent; this observer owns
+//! Linux per-network lifecycle. Requests persist intent; this observer owns
 //! RPC waits and listeners, so client disconnection cannot cancel accepted work.
 use crate::{Agent, http, overlay::EasyTier, storage_error};
 use rove_protocol::{ApiError, contract::AGENT};
@@ -16,11 +16,11 @@ pub(crate) struct Driver {
     client: EasyTier,
     listener: String,
     port: u16,
-    endpoint: Mutex<Option<Endpoint>>,
+    endpoints: Mutex<std::collections::BTreeMap<String, Endpoint>>,
     peers: std::sync::RwLock<std::collections::BTreeMap<String, Value>>,
 }
 struct Endpoint {
-    network: String,
+    subnet: ipnet::Ipv4Net,
     interface: String,
     interface_index: u32,
     address: Ipv4Addr,
@@ -35,11 +35,20 @@ impl Drop for Endpoint {
 }
 impl Driver {
     pub(crate) async fn close(&self, agent: &Agent) {
-        for peer in self.peers.write().unwrap().values_mut() {
-            peer["state"] = json!("offline");
-            peer["overlay_addresses"] = json!([]);
+        let ids: Vec<_> = self.endpoints.lock().await.keys().cloned().collect();
+        for id in ids {
+            self.close_network(agent, &id).await;
         }
-        if let Some(mut endpoint) = self.endpoint.lock().await.take() {
+        let _ = agent.stop_services(None).await;
+    }
+    async fn close_network(&self, agent: &Agent, network: &str) {
+        for peer in self.peers.write().unwrap().values_mut() {
+            if peer["network_id"] == network {
+                peer["state"] = json!("offline");
+                peer["overlay_addresses"] = json!([]);
+            }
+        }
+        if let Some(mut endpoint) = self.endpoints.lock().await.remove(network) {
             endpoint.stopping.cancel();
             if tokio::time::timeout(Duration::from_secs(2), &mut endpoint.task)
                 .await
@@ -49,7 +58,7 @@ impl Driver {
                 let _ = (&mut endpoint.task).await;
             }
         }
-        let _ = agent.stop_services(None).await;
+        let _ = agent.stop_services(Some(network)).await;
     }
 }
 impl Agent {
@@ -76,10 +85,10 @@ impl Agent {
         let driver = self.network_driver.get().ok_or_else(|| {
             ApiError::new(503, "target_unreachable", "No overlay driver is available")
         })?;
-        let endpoint = driver.endpoint.lock().await;
+        let endpoint = driver.endpoints.lock().await;
         let endpoint = endpoint
-            .as_ref()
-            .filter(|e| e.network == target.network_id.to_string() && !e.task.is_finished())
+            .get(&target.network_id.to_string())
+            .filter(|e| !e.task.is_finished())
             .ok_or_else(|| {
                 ApiError::new(409, "network_unavailable", "Target network is not joined")
             })?;
@@ -273,7 +282,7 @@ impl Agent {
                 client,
                 listener,
                 port: api_port,
-                endpoint: Mutex::new(None),
+                endpoints: Mutex::new(std::collections::BTreeMap::new()),
                 peers: std::sync::RwLock::new(std::collections::BTreeMap::new()),
             })
             .map_err(|_| anyhow::anyhow!("Network driver already configured"))?;
@@ -326,53 +335,81 @@ impl Agent {
             driver.close(self).await;
             return;
         };
-        if records.len() != 1 {
-            driver.close(self).await;
-            // Never choose an arbitrary network if old data violates the rule.
-            for record in &mut records {
-                if record["enabled"] == false {
-                    let result = tokio::time::timeout(
-                        Duration::from_secs(8),
-                        self.reconcile_network(driver, record),
-                    )
-                    .await;
-                    if matches!(result, Ok(Ok(()))) {
-                        record["updated_at"] = json!(rove_core::now());
-                        let _ = self.save_network_state(record);
-                        continue;
-                    }
-                }
-                record["state"] = json!("failed");
-                record["overlay_addresses"] = json!([]);
-                record["last_error"] = json!(ApiError::new(
-                    409,
-                    "network_already_joined",
-                    "Multiple network intents found; stop unwanted networks before continuing"
-                ));
-                record["updated_at"] = json!(rove_core::now());
-                let _ = self.save_network_state(record);
+        // Existing admitted networks win against newly obtained DHCP subnets.
+        // Stop conflicting TUNs before validating any surviving listener.
+        let active: Vec<_> = driver.endpoints.lock().await.keys().cloned().collect();
+        records.sort_by_key(|r| {
+            (
+                !active.iter().any(|id| r["network_id"] == *id),
+                r["network_id"].as_str().unwrap().to_owned(),
+            )
+        });
+        let mut admitted = Vec::new();
+        for record in &mut records {
+            if record["enabled"] != true {
+                continue;
             }
-            return;
+            if record["last_error"]["code"] == "network_subnet_conflict" {
+                continue;
+            }
+            let instance = record["instance_id"].as_str().unwrap().parse().unwrap();
+            if let Ok(Ok(info)) =
+                tokio::time::timeout(Duration::from_secs(3), driver.client.info(instance)).await
+                && let Some(subnet) = runtime_subnet(&info["map"][instance.to_string()])
+            {
+                if admitted
+                    .iter()
+                    .any(|other| crate::networks::subnets_overlap(subnet, *other))
+                {
+                    let id = record["network_id"].as_str().unwrap();
+                    driver.close_network(self, id).await;
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(3), driver.client.stop(instance))
+                            .await;
+                    record["state"] = json!("failed");
+                    record["overlay_addresses"] = json!([]);
+                    record["overlay_cidr"] = json!(subnet.to_string());
+                    record["last_error"] = json!(ApiError::new(
+                        409,
+                        "network_subnet_conflict",
+                        "Actual EasyTier subnet overlaps another joined network; stop or reconfigure this network"
+                    ));
+                } else {
+                    admitted.push(subnet);
+                }
+            }
         }
-        let mut record = records.pop().unwrap();
-        let result = tokio::time::timeout(
-            Duration::from_secs(8),
-            self.reconcile_network(driver, &mut record),
-        )
-        .await;
-        if !matches!(result, Ok(Ok(()))) {
-            driver.close(self).await;
-            record["state"] = json!("failed");
-            record["overlay_addresses"] = json!([]);
-            record["last_error"] = json!(ApiError::new(
-                503,
-                "overlay_unavailable",
-                "EasyTier state or isolated listener could not be established; inspect the local network service"
-            ));
-        }
-        record["updated_at"] = json!(rove_core::now());
-        if self.save_network_state(&record).is_err() {
-            driver.close(self).await;
+        for mut record in records {
+            let id = record["network_id"].as_str().unwrap().to_owned();
+            if record["enabled"] == true
+                && record["last_error"]["code"] == "network_subnet_conflict"
+            {
+                driver.close_network(self, &id).await;
+                let instance = record["instance_id"].as_str().unwrap().parse().unwrap();
+                let _ = tokio::time::timeout(Duration::from_secs(3), driver.client.stop(instance))
+                    .await;
+            } else {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(8),
+                    self.reconcile_network(driver, &mut record),
+                )
+                .await;
+                if !matches!(result, Ok(Ok(()))) {
+                    driver.close_network(self, &id).await;
+                    record["state"] = json!("failed");
+                    record["overlay_addresses"] = json!([]);
+                    record["overlay_cidr"] = Value::Null;
+                    record["last_error"] = json!(ApiError::new(
+                        503,
+                        "overlay_unavailable",
+                        "EasyTier state or isolated listener could not be established; inspect the local network service"
+                    ));
+                }
+            }
+            record["updated_at"] = json!(rove_core::now());
+            if self.save_network_state(&record).is_err() {
+                driver.close_network(self, &id).await;
+            }
         }
     }
 
@@ -385,7 +422,7 @@ impl Agent {
         let instance = record["instance_id"].as_str().unwrap().parse()?;
         let instances = driver.client.list_instances().await?;
         if record["enabled"] == false {
-            driver.close(self).await;
+            driver.close_network(self, &id).await;
             if instances.contains(&instance) {
                 driver.client.stop(instance).await?;
             }
@@ -395,20 +432,61 @@ impl Agent {
             );
             record["state"] = json!("stopped");
             record["overlay_addresses"] = json!([]);
+            record["overlay_cidr"] = Value::Null;
             record["last_error"] = Value::Null;
             return Ok(());
         }
         // Do not adopt, overwrite or remove instances belonging to another app.
+        let known = {
+            let db = self.store.connection.lock().unwrap();
+            let mut stmt =
+                db.prepare("SELECT json_extract(record,'$.instance_id') FROM networks")?;
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
         anyhow::ensure!(
-            instances.iter().all(|value| *value == instance),
-            "Dedicated EasyTier service contains another instance"
+            instances
+                .iter()
+                .all(|value| known.contains(&value.to_string())),
+            "Dedicated EasyTier service contains an unowned instance"
         );
         if !instances.contains(&instance) {
-            driver.close(self).await;
+            driver.close_network(self, &id).await;
+            let mut listener: url::Url = record["listener_url"]
+                .as_str()
+                .unwrap_or(&driver.listener)
+                .parse()?;
+            // One bootstrap listener may use the configured fixed port; each
+            // additional instance uses an OS-assigned port, never the same bind.
+            let reserved = {
+                let db = self.store.connection.lock().unwrap();
+                let mut stmt = db.prepare(
+                    "SELECT json_extract(record,'$.listener_url') FROM networks WHERE id<>?1",
+                )?;
+                let urls = stmt
+                    .query_map([&id], |row| row.get::<_, Option<String>>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                urls.into_iter().flatten().any(|raw| {
+                    raw.parse::<url::Url>()
+                        .ok()
+                        .is_some_and(|other| other.port() == listener.port())
+                })
+            };
+            if record["listener_url"].is_null() && (!instances.is_empty() || reserved) {
+                listener
+                    .set_port(Some(0))
+                    .map_err(|_| anyhow::anyhow!("Invalid listener"))?;
+            }
             driver
                 .client
-                .start(instance, &self.network(&id)?.1, &driver.listener)
+                .start_with_address(
+                    instance,
+                    &self.network(&id)?.1,
+                    listener.as_str(),
+                    record.get("local_ipv4"),
+                )
                 .await?;
+            record["listener_url"] = json!(listener.as_str());
             record["state"] = json!("starting");
             record["overlay_addresses"] = json!([]);
             record["last_error"] = Value::Null;
@@ -421,8 +499,20 @@ impl Agent {
             "Network instance failed"
         );
         let node = &info["my_node_info"];
+        if let Some(listeners) = node["listeners"].as_array() {
+            for value in listeners {
+                if let Some(raw) = value["url"].as_str()
+                    && let Ok(url) = raw.parse::<url::Url>()
+                    && url.scheme() == "tcp"
+                    && url.port().is_some_and(|p| p > 0)
+                {
+                    record["listener_url"] = json!(url.as_str());
+                    break;
+                }
+            }
+        }
         if info["running"] != true || node["virtual_ipv4"].is_null() {
-            driver.close(self).await;
+            driver.close_network(self, &id).await;
             record["state"] = json!("starting");
             record["overlay_addresses"] = json!([]);
             record["last_error"] = Value::Null;
@@ -437,19 +527,39 @@ impl Agent {
             .and_then(|v| u32::try_from(v).ok())
             .ok_or_else(|| anyhow::anyhow!("Invalid overlay address"))?;
         let address = Ipv4Addr::from(raw);
+        let subnet =
+            runtime_subnet(info).ok_or_else(|| anyhow::anyhow!("Invalid runtime subnet"))?;
+        let config = self.network(&id)?.1;
+        if config["easytier"]["dhcp"] == false {
+            let expected =
+                crate::networks::validate_local_address(&config, record.get("local_ipv4"), true)?;
+            anyhow::ensure!(
+                expected == Some(address) && config["easytier"]["ipv4_cidr"] == subnet.to_string(),
+                "Runtime static address does not match the local configuration"
+            );
+        }
+        let overlaps =
+            driver.endpoints.lock().await.iter().any(|(other, e)| {
+                other != &id && crate::networks::subnets_overlap(subnet, e.subnet)
+            });
+        anyhow::ensure!(
+            !overlaps,
+            "Overlay subnet overlaps another admitted network"
+        );
         let interface = info["dev_name"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing TUN interface"))?;
         let interface_index = http::validate_overlay(interface, address)?;
-        let same = driver.endpoint.lock().await.as_ref().is_some_and(|e| {
-            e.network == id
+        http::check_overlay_subnet(interface, subnet)?;
+        let same = driver.endpoints.lock().await.get(&id).is_some_and(|e| {
+            e.subnet == subnet
                 && e.interface == interface
                 && e.interface_index == interface_index
                 && e.address == address
                 && !e.task.is_finished()
         });
         if !same {
-            driver.close(self).await;
+            driver.close_network(self, &id).await;
             let listener = http::bind_overlay(interface, SocketAddrV4::new(address, driver.port))?;
             let stopping = self.runtime.stopping.child_token();
             let task = tokio::spawn(http::serve_bound(
@@ -458,14 +568,17 @@ impl Agent {
                 listener,
                 stopping.clone(),
             ));
-            *driver.endpoint.lock().await = Some(Endpoint {
-                network: id.clone(),
-                interface: interface.into(),
-                interface_index,
-                address,
-                stopping,
-                task,
-            });
+            driver.endpoints.lock().await.insert(
+                id.clone(),
+                Endpoint {
+                    subnet,
+                    interface: interface.into(),
+                    interface_index,
+                    address,
+                    stopping,
+                    task,
+                },
+            );
         }
         self.reconcile_service_overlay(&id, interface, address)
             .await?;
@@ -473,9 +586,20 @@ impl Agent {
             .await;
         record["state"] = json!("running");
         record["overlay_addresses"] = json!([address.to_string()]);
+        record["overlay_cidr"] = json!(subnet.to_string());
         record["last_error"] = Value::Null;
         Ok(())
     }
+}
+
+fn runtime_subnet(info: &Value) -> Option<ipnet::Ipv4Net> {
+    let ip = &info["my_node_info"]["virtual_ipv4"];
+    let address = Ipv4Addr::from(u32::try_from(ip["address"]["addr"].as_u64()?).ok()?);
+    let prefix = u8::try_from(ip["network_length"].as_u64()?).ok()?;
+    if prefix == 0 || prefix > 30 {
+        return None;
+    }
+    Some(ipnet::Ipv4Net::new(address, prefix).ok()?.trunc())
 }
 
 fn peer_from_hello(

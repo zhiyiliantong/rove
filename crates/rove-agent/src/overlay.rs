@@ -28,7 +28,18 @@ impl EasyTier {
         join: &Value,
         listener: &str,
     ) -> anyhow::Result<()> {
+        self.start_with_address(instance_id, join, listener, None)
+            .await
+    }
+    pub async fn start_with_address(
+        &self,
+        instance_id: Uuid,
+        join: &Value,
+        listener: &str,
+        local_ipv4: Option<&Value>,
+    ) -> anyhow::Result<()> {
         crate::sharing::validate_join(join)?;
+        let address = crate::networks::validate_local_address(join, local_ipv4, true)?;
         let url: url::Url = listener.parse()?;
         anyhow::ensure!(
             url.scheme() == "tcp"
@@ -42,7 +53,19 @@ impl EasyTier {
         );
         let config = NetworkConfig {
             instance_id: Some(instance_id.to_string()),
-            dhcp: Some(true),
+            dhcp: Some(join["easytier"]["dhcp"] == true),
+            virtual_ipv4: address.map(|v| v.to_string()),
+            network_length: if address.is_some() {
+                Some(
+                    join["easytier"]["ipv4_cidr"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<ipnet::Ipv4Net>()?
+                        .prefix_len() as i32,
+                )
+            } else {
+                None
+            },
             hostname: Some(format!("rove-{}", &instance_id.simple().to_string()[..8])),
             network_name: Some(join["easytier"]["network_name"].as_str().unwrap().into()),
             network_secret: Some(join["easytier"]["network_secret"].as_str().unwrap().into()),

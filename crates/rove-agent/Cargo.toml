@@ -30,6 +30,7 @@ reqwest.workspace = true
 libc.workspace = true
 rig = { package = "rig-core", version = "=0.42.0", default-features = false, features = ["reqwest", "rustls"] }
 futures-util = "0.3"
+sha2 = "0.10"
 easytier = { git = "https://github.com/EasyTier/EasyTier", rev = "8428a89d2dabc94c97d370ec607c6ca142473626", default-features = false, features = ["zstd"], optional = true }
 
 [dev-dependencies]

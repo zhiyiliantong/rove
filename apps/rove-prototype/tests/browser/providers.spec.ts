@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 async function openModels(page: Page) {
   await page.goto('/#/models'); await page.getByRole('button', { name: '添加模型', exact: true }).click();
 }

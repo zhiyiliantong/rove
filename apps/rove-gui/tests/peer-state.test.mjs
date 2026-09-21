@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {peer_state,peer_target} from '../src/peer-state.ts';
+import {set_locale} from '../src/i18n.ts';
+set_locale('zh-CN');
 const network_id='11111111-1111-4111-8111-111111111111';
 const peer={network_id,device_id:'22222222-2222-4222-8222-222222222222',state:'online',capabilities:[]};
 test('mobile capability absence does not change peer identity or prevent selection',()=>{

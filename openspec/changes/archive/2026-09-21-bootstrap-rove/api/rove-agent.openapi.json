@@ -1,0 +1,5330 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rove Agent API",
+    "version": "0.1.0",
+    "description": "bootstrap-rove 开发契约；实际支持范围以平台验收记录为准。每个 HTTP 操作在接收设备执行。网络成员完全信任，无 Rove 令牌/RBAC；远程只经 EasyTier overlay。本机 SDK 用相同 operationId/schema，经独立 socket 帧映射。"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "http://{overlay_address}:{agent_port}",
+      "description": "仅示意配置形式；部署按选定 overlay 地址监听",
+      "variables": {
+        "overlay_address": {
+          "default": "10.144.0.2"
+        },
+        "agent_port": {
+          "default": "43190",
+          "description": "本提案默认端口，可由部署统一覆盖；不是 IANA 注册端口"
+        }
+      }
+    }
+  ],
+  "security": [],
+  "tags": [
+    {
+      "name": "runtime",
+      "description": "本机运行信息与设置"
+    },
+    {
+      "name": "model",
+      "description": "设备模型配置"
+    },
+    {
+      "name": "networks",
+      "description": "个人网络实例"
+    },
+    {
+      "name": "sharing",
+      "description": "加入配置与分享"
+    },
+    {
+      "name": "devices",
+      "description": "设备发现"
+    },
+    {
+      "name": "sessions",
+      "description": "会话"
+    },
+    {
+      "name": "runs",
+      "description": "AI 作业及事件"
+    },
+    {
+      "name": "services",
+      "description": "服务代理"
+    }
+  ],
+  "paths": {
+    "/v1/network-probes": {
+      "post": {
+        "operationId": "test_network_peer",
+        "summary": "逐条测试初始节点的 TCP 可达性，不加入网络",
+        "tags": ["networks"],
+        "parameters": [{"$ref": "#/components/parameters/ContextNetwork"}, {"$ref": "#/components/parameters/TargetDevice"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NetworkPeerProbe"}}}},
+        "responses": {
+          "200": {"description": "探测结果；TCP 可达不表示 EasyTier 认证成功", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NetworkPeerProbeResult"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/hello": {
+      "get": {
+        "operationId": "get_hello",
+        "summary": "握手与协议能力",
+        "tags": [
+          "runtime"
+        ],
+        "description": "握手与协议能力",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Hello"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/device": {
+      "get": {
+        "operationId": "get_device",
+        "summary": "获取执行设备信息",
+        "tags": [
+          "runtime"
+        ],
+        "description": "获取执行设备信息",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/storage": {
+      "get": {
+        "operationId": "get_storage_usage",
+        "summary": "只读检查 Rove 数据目录占用",
+        "tags": ["runtime"],
+        "description": "只读取当前 agent 数据目录顶层文件的元数据，不读取文件内容、不递归目录、不跟随符号链接。不接受任意路径。最多检查 512 个目录项；total_bytes 只是已统计普通文件的逻辑大小，不是磁盘实际占用或可回收空间。目录、链接、读取错误或超过上限时 complete=false。没有清理、压缩或在线迁移副作用。",
+        "parameters": [
+          {"$ref": "#/components/parameters/ContextNetwork"},
+          {"$ref": "#/components/parameters/TargetDevice"}
+        ],
+        "responses": {
+          "200": {
+            "description": "只读占用快照",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StorageUsage"}}}
+          },
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "operationId": "get_settings",
+        "summary": "读取设备运行设置",
+        "tags": [
+          "runtime"
+        ],
+        "description": "读取设备运行设置",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "update_settings",
+        "summary": "更新并发或配置服务地址",
+        "tags": [
+          "runtime"
+        ],
+        "description": "只更新提供字段；config_server_url 为 null 表示清除。调低并发不取消已有 run。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-config": {
+      "get": {
+        "operationId": "get_model_config",
+        "summary": "读取脱敏模型配置",
+        "tags": [
+          "model"
+        ],
+        "description": "读取脱敏模型配置",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConfigState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "set_model_config",
+        "summary": "替换设备默认模型配置",
+        "tags": [
+          "model"
+        ],
+        "description": "替换设备默认模型配置；兼容接口仅更新专用 legacy 条目并设为默认，不删除其他连接。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConfigWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConfigState"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clear_model_config",
+        "summary": "清除默认模型配置",
+        "tags": [
+          "model"
+        ],
+        "description": "幂等；运行中作业使用原快照，后续排队作业开始时若无配置则失败。 清除默认选择并删除兼容接口创建的 legacy 条目；其他连接保留。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks": {
+      "get": {
+        "operationId": "list_networks",
+        "summary": "列出本机保存网络",
+        "tags": [
+          "networks"
+        ],
+        "description": "列出本机保存网络",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_network",
+        "summary": "创建并保存新网络",
+        "tags": [
+          "networks"
+        ],
+        "description": "创建为 stopped。非幂等，响应不明时先查询，不自动新建第二个网络。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/imports": {
+      "post": {
+        "operationId": "import_network",
+        "summary": "从 URL 或手动配置导入网络",
+        "tags": [
+          "sharing"
+        ],
+        "description": "相同网络 ID 与内容幂等复用，冲突返回 409。新导入为 stopped；GUI/CLI随后调用 start_network。此处返回 200 表示配置已保存，不表示已经连通。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkImport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}": {
+      "get": {
+        "operationId": "get_network",
+        "summary": "查看本机网络运行状态",
+        "tags": [
+          "networks"
+        ],
+        "description": "查看本机网络运行状态",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_network",
+        "summary": "显式替换停止网络的配置",
+        "tags": [
+          "networks"
+        ],
+        "description": "仅允许 stopped 或已清理资源的 failed 状态。保留 network_id 与 instance_id。运行中返回 409 network_must_be_stopped。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_network",
+        "summary": "删除已停止的本机网络",
+        "tags": [
+          "networks"
+        ],
+        "description": "已不存在时仍返回 204。运行中拒绝。删除该网络的本机发布定义与路由缓存；不删会话、模型、已部署应用和其他成员配置。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}/start": {
+      "post": {
+        "operationId": "start_network",
+        "summary": "启动本机网络实例",
+        "tags": [
+          "networks"
+        ],
+        "description": "每台设备同时只加入一个网络。另一网络尚未确认停止时返回 409 network_already_joined，不自动切换；否则持久 enabled=true 并启动，最终状态通过 get_network 查询。客户端断线不撤销启动。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已经运行或已在启动，返回当前状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已接受；查询资源获取最终状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}/stop": {
+      "post": {
+        "operationId": "stop_network",
+        "summary": "停止本机网络实例",
+        "tags": [
+          "networks"
+        ],
+        "description": "enabled=false，关闭此网络代理；会话作业继续。经此网络远程停止可能丢失响应，客户端必须查询而非假定失败。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已停止或正在停止，返回当前状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已接受；查询资源获取最终状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Network"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}/join-config": {
+      "get": {
+        "operationId": "get_network_join_config",
+        "summary": "导出可手动分享的加入配置",
+        "tags": [
+          "sharing"
+        ],
+        "description": "显式导出包含网络凭据，响应 Cache-Control:no-store，不得写常规日志。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinConfig"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}/shares": {
+      "post": {
+        "operationId": "create_network_share",
+        "summary": "创建加密 URL 分享",
+        "tags": [
+          "sharing"
+        ],
+        "description": "请求体可为 {}。本机加密后上传密文，返回含 fragment 密钥的 URL 和七天到期时间；重试可能创建独立分享，不自动重试。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/networks/{network_id}/devices": {
+      "get": {
+        "operationId": "list_network_devices",
+        "summary": "发现并列出网络中的 Rove 设备",
+        "tags": [
+          "devices"
+        ],
+        "description": "refresh=true 刷新底层候选后探测。普通 EasyTier 节点不进入 Rove 设备列表；离线已知设备可保留。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/NetworkId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeerPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "operationId": "list_sessions",
+        "summary": "列出当前 agent 拥有的会话及远端关联",
+        "tags": [
+          "sessions"
+        ],
+        "description": "本机元数据列表；含 execution_target 的会话在其他设备执行，但不会因查询或重启而重新提交任务。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "省略列出全部，false 未归档，true 已归档。"
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
+            "description": "按 created_at 和 session_id 稳定排序；desc 最新创建在前。游标绑定排序及筛选，后续页须保留相同参数。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_session",
+        "summary": "创建本机会话或远端执行关联",
+        "tags": [
+          "sessions"
+        ],
+        "description": "默认创建本机执行会话；execution_target 创建本机拥有的远端会话关联，不转移凭据。session_id 可用于安全重试创建。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}": {
+      "get": {
+        "operationId": "get_session",
+        "summary": "读取会话元数据",
+        "tags": [
+          "sessions"
+        ],
+        "description": "读取会话元数据",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "update_session",
+        "summary": "修改会话标题或持久模型选择",
+        "tags": [
+          "sessions"
+        ],
+        "description": "未提供的字段保留；model_id=null 跟随设备默认；已归档会话只读。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_session",
+        "summary": "永久删除已归档会话",
+        "description": "仅已归档且无 queued/running/cancelling 作业时允许。事务性删除会话和消息/工具/事件/作业输出，不删除服务或文件。保留无内容的 request_id 墓碑，旧 ID 再提交返回 409 request_deleted，永不重执行。 远端关联仅删除发起端记录，不删除执行端事实；有未确认请求或非终态快照时拒绝。",
+        "tags": [
+          "sessions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/messages": {
+      "get": {
+        "operationId": "list_messages",
+        "summary": "读取已持久化会话历史",
+        "tags": [
+          "sessions"
+        ],
+        "description": "按持久消息顺序分页；排队中尚未执行的未来输入从 run 查询，不混入当前模型上下文。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/runs": {
+      "post": {
+        "operationId": "submit_run",
+        "summary": "提交会话消息并接受一个 AI 作业",
+        "tags": [
+          "runs"
+        ],
+        "description": "接受事务保存 request_id 与完整请求摘要。重复检查先于模型与容量检查；同 ID不同内容为 409。新请求缺模型返回 422 model_not_configured，队列满为 429 queue_full。已接受请求断线继续运行。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSubmit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "相同 request_id 重试，返回原作业当前状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已接受；查询资源获取最终状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-idempotency": {
+          "key": "body.request_id",
+          "scope": "execution_device",
+          "conflict_status": 409
+        }
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "operationId": "list_runs",
+        "summary": "查询执行设备作业",
+        "tags": [
+          "runs"
+        ],
+        "description": "指定远端关联会话时通过 SDK 查询并保存目录；不可达时返回附 sync_error 的缓存。无会话过滤时合并本机作业与已观察远端记录，不承诺远端实时刷新。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run",
+        "summary": "获取作业状态与输出快照",
+        "tags": [
+          "runs"
+        ],
+        "description": "获取作业状态与输出快照",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run",
+        "summary": "取消指定作业",
+        "tags": [
+          "runs"
+        ],
+        "description": "运行中进入 cancelling；queued 直接 cancelled；终态不变。重复调用不取消其他 run，不回滚系统变更。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "排队作业已取消或作业已终态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已接受；查询资源获取最终状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/events": {
+      "get": {
+        "operationId": "subscribe_run_events",
+        "summary": "订阅并恢复作业 SSE 事件",
+        "tags": [
+          "runs"
+        ],
+        "description": "订阅并恢复作业 SSE 事件",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "description": "返回严格大于此序号的事件；省略且无 Last-Event-ID 时从 0 开始"
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            },
+            "description": "与 after_seq 同时存在时必须相同，否则 400"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE：id=十进制 seq；event=run_event；data=RunEvent JSON。terminal status 发出后关闭；重连终态无新事件可返回 204。游标过旧返回 410 event_history_expired，先获取快照。",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "id: 1\nevent: run_event\ndata: {\"run_id\":\"00000000-0000-4000-8000-000000000001\",\"seq\":1,\"created_at\":\"2026-09-07T00:00:00Z\",\"kind\":\"status\",\"data\":{\"status\":\"queued\"}}\n\n"
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "作业已终态且游标后无新事件；不要继续重连"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-event-schema": {
+          "$ref": "#/components/schemas/RunEvent"
+        },
+        "x-local-socket-response": {
+          "$ref": "#/components/schemas/SocketStreamOpened"
+        }
+      }
+    },
+    "/v1/services": {
+      "get": {
+        "operationId": "list_services",
+        "summary": "查询本机提供的网络服务",
+        "tags": [
+          "services"
+        ],
+        "description": "只返回本执行设备的目录；SDK 聚合网络中各在线设备的结果。包含 access_info，响应 no-store。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "network_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "publish_service",
+        "summary": "创建 TCP 服务代理及持久登记",
+        "tags": [
+          "services"
+        ],
+        "description": "network_id 必须是执行设备已运行网络。端口省略时分配并持久保存；代理绑定与保存成功才返回。非幂等，不自动重试不确定创建。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/services/{service_id}": {
+      "get": {
+        "operationId": "get_service",
+        "summary": "读取服务入口与认证信息",
+        "tags": [
+          "services"
+        ],
+        "description": "读取服务入口与认证信息",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/ServiceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_service",
+        "summary": "替换服务发布配置",
+        "tags": [
+          "services"
+        ],
+        "description": "保留 service_id 与归属 network_id，不支持移动至另一网络。listen_port 省略则保留旧端口；变更失败保留旧发布或明确报告错误，不能默默中断旧定义。access_info 省略清空。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/ServiceId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unpublish_service",
+        "summary": "取消代理并删除发布定义",
+        "tags": [
+          "services"
+        ],
+        "description": "幂等；关闭对应代理连接和监听，不停止应用或删除其数据。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/ServiceId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/archive": {
+      "post": {
+        "operationId": "archive_session",
+        "summary": "归档会话",
+        "description": "幂等保留首次归档时间，不取消任务；归档后禁止修改标题或提交新作业，原 request_id 重试仍返回原作业。",
+        "tags": [
+          "sessions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "restore_session",
+        "summary": "恢复会话",
+        "description": "保留原会话 ID 和历史，幂等；不重放任务。",
+        "tags": [
+          "sessions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "成功，无响应体"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-connections/{connection_id}/sync": {
+      "post": {
+        "operationId": "sync_model_connection",
+        "summary": "显式将此设备的 API 连接同步到一个目标设备，不同步账号登录",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string", "format": "uuid"}
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "目标设备的脱敏模型目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-sync/import": {
+      "post": {
+        "operationId": "receive_model_sync",
+        "summary": "原子接收 API 配置快照；相同来源和内容幂等，覆盖需确认",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSyncImport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "目标设备的脱敏模型目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-catalog": {
+      "get": {
+        "operationId": "get_model_catalog",
+        "summary": "读取模型与共享连接（不返回凭据）",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-catalog/import": {
+      "post": {
+        "operationId": "import_models",
+        "summary": "原子添加一个 API 连接及多个型号",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelImport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/{model_id}": {
+      "patch": {
+        "operationId": "rename_model",
+        "summary": "修改模型配置名称",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRename"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/default": {
+      "put": {
+        "operationId": "set_default_model",
+        "summary": "设置或取消默认模型",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultModelWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/model-connections/{connection_id}": {
+      "put": {
+        "operationId": "update_model_connection",
+        "summary": "全量更新共享连接（密钥为空表示清除）",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_model_connection",
+        "summary": "移除连接及其型号；保留历史，运行中作业不受影响",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/model-catalog/test": {
+      "post": {
+        "operationId": "test_model",
+        "summary": "显式小额推理测试，无工具或会话；25 秒超时，不保存未提交密钥，失败使之前测试失效",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTestResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTestInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/model-catalog/discover": {
+      "post": {
+        "operationId": "discover_models",
+        "summary": "从目标设备查询提供商型号列表（不保存密钥，不验证推理权限）",
+        "tags": [
+          "model"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDiscovery"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/submissions": {
+      "get": {
+        "operationId": "list_session_submissions",
+        "summary": "读取远端提交结果未确认的持久请求",
+        "tags": [
+          "sessions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ContextNetwork"
+          },
+          {
+            "$ref": "#/components/parameters/TargetDevice"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "未确认的请求；只读，不自动重新提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingSubmissionPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "Timestamp": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "稳定机器错误码"
+          },
+          "message": {
+            "type": "string",
+            "description": "可读错误说明"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "examples": [
+          {
+            "error": {
+              "code": "queue_full",
+              "message": "等待队列已满，请稍后重试",
+              "retryable": true
+            }
+          }
+        ]
+      },
+      "ProtocolRange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "min": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "Hello": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "display_name",
+          "agent_version",
+          "protocol",
+          "capabilities",
+          "network_id"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/ProtocolRange"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "network_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "display_name",
+          "os",
+          "arch",
+          "agent_version",
+          "capabilities",
+          "started_at"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "enum": [
+              "linux",
+              "windows",
+              "macos",
+              "android",
+              "ios"
+            ]
+          },
+          "arch": {
+            "type": "string"
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Settings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "max_active_runs",
+          "config_server_url"
+        ],
+        "properties": {
+          "max_active_runs": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 4
+          },
+          "config_server_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "配置服务 HTTPS 根地址；开发可显式允许 loopback HTTP",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "examples": [
+          {
+            "max_active_runs": 4,
+            "config_server_url": "https://config.example.com"
+          }
+        ]
+      },
+      "SettingsPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "max_active_runs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "config_server_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "minProperties": 1,
+        "examples": [
+          {
+            "max_active_runs": 6
+          }
+        ]
+      },
+      "ModelConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "base_url",
+          "model",
+          "api_key_configured"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "model": {
+            "type": "string"
+          },
+          "api_key_configured": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ModelConfigState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configured",
+          "config"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "configured": {
+                "const": false
+              },
+              "config": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "properties": {
+              "configured": {
+                "const": true
+              },
+              "config": {
+                "$ref": "#/components/schemas/ModelConfig"
+              }
+            }
+          }
+        ],
+        "examples": [
+          {
+            "configured": false,
+            "config": null
+          }
+        ]
+      },
+      "ModelConfigWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "base_url",
+          "model",
+          "api_key"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "null 表示此提供方无需密钥；PUT 是全量替换，不自动保留旧密钥",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "examples": [
+          {
+            "provider": "openai_compatible",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "example-model",
+            "api_key": null
+          }
+        ]
+      },
+      "NetworkPeerProbe": {
+        "type": "object", "additionalProperties": false, "required": ["endpoint"],
+        "properties": {"endpoint": {"type": "string", "format": "uri", "maxLength": 2048}}
+      },
+      "NetworkPeerProbeResult": {
+        "type": "object", "additionalProperties": false, "required": ["endpoint", "status", "latency_ms", "message"],
+        "properties": {
+          "endpoint": {"type": "string"},
+          "status": {"type": "string", "enum": ["reachable", "unreachable", "unsupported"]},
+          "latency_ms": {"type": ["integer", "null"], "minimum": 0},
+          "message": {"type": "string"}
+        }
+      },
+      "EasyTierJoinConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network_name",
+          "network_secret",
+          "bootstrap_peers",
+          "dhcp"
+        ],
+        "properties": {
+          "network_name": {
+            "type": "string",
+            "description": "用于底层网络匹配",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "network_secret": {
+            "type": "string",
+            "description": "底层网络凭据；不能在普通列表或日志输出",
+            "minLength": 1
+          },
+          "bootstrap_peers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "EasyTier 端点，例如 tcp://host:11010",
+              "format": "uri"
+            }
+          },
+          "ipv4_cidr": {
+            "type": "string",
+            "description": "手动模式的规范网络 CIDR，不含本机固定 IP。dhcp=true 时旧载荷中的此字段仅作兼容元数据，不控制分配。",
+            "pattern": "^[0-9.]+/[0-9]{1,2}$"
+          },
+          "dhcp": {
+            "type": "boolean",
+            "description": "true：原版 EasyTier 自动分配；false：指定网段，每台设备另行配置本机 local_ipv4，不随分享复制"
+          }
+        }
+      },
+      "JoinConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "network_id",
+          "display_name",
+          "easytier"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "easytier": {
+            "$ref": "#/components/schemas/EasyTierJoinConfig"
+          }
+        },
+        "examples": [
+          {
+            "schema_version": 1,
+            "network_id": "00000000-0000-4000-8000-000000000021",
+            "display_name": "家庭网络",
+            "easytier": {
+              "network_name": "rove-family",
+              "network_secret": "example-network-secret-not-for-production",
+              "bootstrap_peers": [
+                "tcp://192.0.2.1:11010"
+              ],
+              "ipv4_cidr": "10.144.0.0/24",
+              "dhcp": true
+            }
+          }
+        ]
+      },
+      "NetworkState": {
+        "type": "string",
+        "enum": [
+          "stopped",
+          "starting",
+          "running",
+          "stopping",
+          "failed"
+        ]
+      },
+      "Network": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network_id",
+          "display_name",
+          "instance_id",
+          "enabled",
+          "state",
+          "overlay_addresses",
+          "last_error",
+          "updated_at"
+        ],
+        "properties": {
+          "local_ipv4": {"type": ["string", "null"], "description": "仅本机静态 IPv4；不进入 JoinConfig"},
+          "overlay_cidr": {"type": ["string", "null"], "description": "EasyTier 实际运行网段；未确定时为 null"},
+          "listener_url": {"type": ["string", "null"], "description": "本机 EasyTier TCP 监听，仅本机记录，不自动加入分享名片；通配地址不能直接作为远端初始节点"},
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "持久期望状态；启动设为 true，停止设为 false"
+          },
+          "state": {
+            "$ref": "#/components/schemas/NetworkState"
+          },
+          "overlay_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NetworkCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "display_name"
+        ],
+        "properties": {
+          "local_ipv4": {"type": ["string", "null"], "description": "手动模式本机地址，必须是 config.ipv4_cidr 内可用主机地址"},
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "bootstrap_peers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "ipv4_cidr": {
+            "type": "string",
+            "description": "已弃用的开发版兼容元数据；不控制 DHCP 地址。新客户端应省略。",
+            "deprecated": true
+          },
+          "config": {
+            "$ref": "#/components/schemas/EasyTierJoinConfig"
+          }
+        },
+        "description": "创建新 network_id；省略 config 时生成网络名和底层凭据。config 与 bootstrap_peers/ipv4_cidr 不能同时提供。创建后为 stopped，另行启动。",
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "config",
+                "bootstrap_peers"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "config",
+                "ipv4_cidr"
+              ]
+            }
+          }
+        ]
+      },
+      "NetworkUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "display_name",
+          "easytier"
+        ],
+        "properties": {
+          "local_ipv4": {"type": ["string", "null"], "description": "省略保留本机地址，null 清除；自动模式必须为空"},
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "easytier": {
+            "$ref": "#/components/schemas/EasyTierJoinConfig"
+          }
+        }
+      },
+      "NetworkImport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "url"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "const": "url"
+              },
+              "url": {
+                "type": "string",
+                "description": "完整分享 URL，含 #key=；不得记录到日志",
+                "format": "uri"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "config"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "const": "manual"
+              },
+              "config": {
+                "$ref": "#/components/schemas/JoinConfig"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "source"
+        },
+        "examples": [
+          {
+            "source": "manual",
+            "config": {
+              "schema_version": 1,
+              "network_id": "00000000-0000-4000-8000-000000000021",
+              "display_name": "家庭网络",
+              "easytier": {
+                "network_name": "rove-family",
+                "network_secret": "example-network-secret-not-for-production",
+                "bootstrap_peers": [
+                  "tcp://192.0.2.1:11010"
+                ],
+                "ipv4_cidr": "10.144.0.0/24",
+                "dhcp": true
+              }
+            }
+          }
+        ]
+      },
+      "ImportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network",
+          "created"
+        ],
+        "properties": {
+          "network": {
+            "$ref": "#/components/schemas/Network"
+          },
+          "created": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ShareRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "config_server_url": {
+            "type": "string",
+            "description": "省略时使用设备设置",
+            "format": "uri"
+          }
+        }
+      },
+      "ShareResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network_id",
+          "url",
+          "expires_at"
+        ],
+        "properties": {
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "含密钥 fragment；二维码只编码此值",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Peer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "network_id",
+          "display_name",
+          "os",
+          "arch",
+          "state",
+          "peer_id",
+          "overlay_addresses",
+          "capabilities",
+          "last_seen_at",
+          "last_error"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "incompatible"
+            ]
+          },
+          "peer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overlay_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "device_id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "title_source": {
+            "type": "string",
+            "enum": ["default", "message", "manual"],
+            "description": "标题来源：default 等待首条已接受消息自动命名，message 已从消息提取，manual 显式命名。旧记录缺省时保留原名。"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "归档时间；旧记录省略等同未归档。"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "network_onboarding"
+            ]
+          },
+          "execution_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SocketTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "发起端保存的不可变远端执行关联；远端 session_id 与本机相同，device_id 仍是本机拥有者。"
+          }
+        }
+      },
+      "SessionCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "auto_title": {
+            "type": "boolean",
+            "description": "true 表示 title 为占位名称，在首条消息被接受后自动替换；省略时无 title 才自动命名。显式更新标题后永久停止自动命名。"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "execution_target": {
+            "$ref": "#/components/schemas/SocketTarget"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "可选幂等创建标识；同 ID 同创建输入复用会话，不同输入或已删除时冲突。"
+          }
+        }
+      },
+      "SessionPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "显式命名，去除首尾空白且不可全空白；将 title_source 标记为 manual，后续自动命名不会覆盖。"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "minProperties": 1
+      },
+      "RunStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ]
+      },
+      "RunSubmit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "message"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "network_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "可选任务网络语境；省略时远端使用入口网络、本机使用无网络语境。只影响工具上下文，不是权限。"
+          },
+          "model_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "明确选择型号配置；省略时读取会话持久选择，再使用执行设备默认。纳入幂等摘要；已选择的型号被删除时失败，不回退。"
+          }
+        },
+        "examples": [
+          {
+            "request_id": "00000000-0000-4000-8000-000000000041",
+            "message": "在这台设备上装配音乐服务器",
+            "network_id": "00000000-0000-4000-8000-000000000021"
+          }
+        ]
+      },
+      "ModelIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "base_url",
+          "model"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "request_id",
+          "session_id",
+          "device_id",
+          "status",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "model",
+          "last_seq",
+          "error",
+          "network_id",
+          "input_message"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "network_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input_message": {
+            "type": "string",
+            "maxLength": 65536,
+            "description": "原始提交输入，含排队中的消息；不意味着已经进入会话执行历史。"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "examples": [
+          {
+            "run_id": "00000000-0000-4000-8000-000000000001",
+            "request_id": "00000000-0000-4000-8000-000000000041",
+            "session_id": "00000000-0000-4000-8000-000000000031",
+            "device_id": "00000000-0000-4000-8000-000000000022",
+            "status": "queued",
+            "created_at": "2026-09-07T00:00:00Z",
+            "started_at": null,
+            "finished_at": null,
+            "model": null,
+            "last_seq": 1,
+            "error": null,
+            "network_id": "00000000-0000-4000-8000-000000000021",
+            "input_message": "在这台设备上装配音乐服务器"
+          }
+        ]
+      },
+      "RunSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run",
+          "snapshot_seq",
+          "output_tail",
+          "output_truncated",
+          "retained_from_seq"
+        ],
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "snapshot_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "output_tail": {
+            "type": "string",
+            "description": "有界显示尾部，最多 65536 字符；完整消息见会话历史",
+            "maxLength": 65536
+          },
+          "output_truncated": {
+            "type": "boolean"
+          },
+          "retained_from_seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "sync_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "有值时为本机缓存快照，不代表远端当前状态。"
+          }
+        },
+        "examples": [
+          {
+            "run": {
+              "run_id": "00000000-0000-4000-8000-000000000001",
+              "request_id": "00000000-0000-4000-8000-000000000041",
+              "session_id": "00000000-0000-4000-8000-000000000031",
+              "device_id": "00000000-0000-4000-8000-000000000022",
+              "status": "queued",
+              "created_at": "2026-09-07T00:00:00Z",
+              "started_at": null,
+              "finished_at": null,
+              "model": null,
+              "last_seq": 1,
+              "error": null,
+              "network_id": "00000000-0000-4000-8000-000000000021",
+              "input_message": "在这台设备上装配音乐服务器"
+            },
+            "snapshot_seq": 1,
+            "output_tail": "",
+            "output_truncated": false,
+            "retained_from_seq": 1
+          }
+        ]
+      },
+      "SystemExecInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "working_directory": {
+            "type": "string",
+            "description": "省略时使用 agent 所在账号的默认工作目录"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "default": 300
+          }
+        }
+      },
+      "SystemExecResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "exit_code",
+          "stdout",
+          "stderr",
+          "output_truncated",
+          "residual_processes",
+          "error"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "unsupported"
+            ]
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "output_truncated": {
+            "type": "boolean"
+          },
+          "residual_processes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "取消后仍可能存活的受管理进程说明"
+            }
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ServiceTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "enum": [
+              "127.0.0.1",
+              "::1"
+            ]
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      },
+      "ServiceWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network_id",
+          "name",
+          "target",
+          "protocol"
+        ],
+        "properties": {
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "target": {
+            "$ref": "#/components/schemas/ServiceTarget"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "http",
+              "https"
+            ]
+          },
+          "listen_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "access_info": {
+            "type": "string",
+            "description": "应用认证说明，按不透明文本保存；Rove 不解析或注入鉴权",
+            "maxLength": 65536
+          }
+        },
+        "examples": [
+          {
+            "network_id": "00000000-0000-4000-8000-000000000021",
+            "name": "音乐",
+            "target": {
+              "host": "127.0.0.1",
+              "port": 4533
+            },
+            "protocol": "http",
+            "access_info": "示例账号请使用应用自身设置"
+          }
+        ]
+      },
+      "Service": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "service_id",
+          "network_id",
+          "device_id",
+          "name",
+          "target",
+          "protocol",
+          "listen_port",
+          "access_info",
+          "state",
+          "endpoints",
+          "target_status",
+          "last_error",
+          "updated_at"
+        ],
+        "properties": {
+          "service_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ServiceTarget"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "http",
+              "https"
+            ]
+          },
+          "listen_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "access_info": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "published",
+              "unavailable",
+              "failed"
+            ]
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "当前 TCP/HTTP/HTTPS URL",
+              "format": "uri"
+            }
+          },
+          "target_status": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "reachable",
+              "unreachable"
+            ]
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ToolCall": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "arguments"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "system_exec"
+              },
+              "arguments": {
+                "$ref": "#/components/schemas/SystemExecInput"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "arguments"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "publish_service"
+              },
+              "arguments": {
+                "$ref": "#/components/schemas/ServiceWrite"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "arguments"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "rove_api"
+              },
+              "arguments": {
+                "$ref": "#/components/schemas/RoveApiInput"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "tool_name"
+        }
+      },
+      "ToolResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "result"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "system_exec"
+              },
+              "result": {
+                "$ref": "#/components/schemas/SystemExecResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "result",
+              "error"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "publish_service"
+              },
+              "result": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Service"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Error"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool_call_id",
+              "tool_name",
+              "result",
+              "error"
+            ],
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "tool_name": {
+                "type": "string",
+                "const": "rove_api"
+              },
+              "result": {},
+              "error": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Error"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "tool_name"
+        }
+      },
+      "MessagePart": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "text"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "call"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "tool_call"
+              },
+              "call": {
+                "$ref": "#/components/schemas/ToolCall"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "result"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "tool_result"
+              },
+              "result": {
+                "$ref": "#/components/schemas/ToolResult"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "Message": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message_id",
+          "session_id",
+          "run_id",
+          "role",
+          "parts",
+          "created_at"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagePart"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RunEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "status"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "$ref": "#/components/schemas/RunStatus"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "assistant_delta"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 16384
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "tool_started"
+              },
+              "data": {
+                "$ref": "#/components/schemas/ToolCall"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "tool_output"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tool_call_id",
+                  "stream",
+                  "text"
+                ],
+                "properties": {
+                  "tool_call_id": {
+                    "type": "string"
+                  },
+                  "stream": {
+                    "type": "string",
+                    "enum": [
+                      "stdout",
+                      "stderr"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 16384
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "tool_finished"
+              },
+              "data": {
+                "$ref": "#/components/schemas/ToolResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_id",
+              "seq",
+              "created_at",
+              "kind",
+              "data"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "const": "error"
+              },
+              "data": {
+                "$ref": "#/components/schemas/Error"
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        },
+        "description": "按 run_id 隔离的持久事件，seq 严格递增。terminal status 事件先持久化再关闭流。",
+        "examples": [
+          {
+            "run_id": "00000000-0000-4000-8000-000000000001",
+            "seq": 1,
+            "created_at": "2026-09-07T00:00:00Z",
+            "kind": "status",
+            "data": {
+              "status": "queued"
+            }
+          }
+        ]
+      },
+      "NetworkPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Network"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PeerPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Peer"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SessionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MessagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RunPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sync_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "远端不可达时返回已缓存的作业目录，此字段明确缓存而非实时状态。"
+          }
+        }
+      },
+      "ServicePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "不透明游标；null 表示本次枚举结束"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SocketTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "network_id",
+          "device_id"
+        ],
+        "properties": {
+          "network_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SocketRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "correlation_id",
+          "operation_id"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "request"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "type": "string",
+            "description": "必须匹配本 OpenAPI 中某个 operationId"
+          },
+          "target": {
+            "$ref": "#/components/schemas/SocketTarget"
+          },
+          "path_parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "query_parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "integer",
+                "boolean"
+              ]
+            }
+          },
+          "body": {}
+        },
+        "description": "封装类型；path/query/body 必须再依据 operation_id 对应的 OpenAPI 操作验证。target 省略时操作本机，提供时由本机 agent 转发一次。",
+        "examples": [
+          {
+            "kind": "request",
+            "correlation_id": "00000000-0000-4000-8000-000000000011",
+            "operation_id": "submit_run",
+            "target": {
+              "network_id": "00000000-0000-4000-8000-000000000021",
+              "device_id": "00000000-0000-4000-8000-000000000022"
+            },
+            "path_parameters": {
+              "session_id": "00000000-0000-4000-8000-000000000031"
+            },
+            "body": {
+              "request_id": "00000000-0000-4000-8000-000000000041",
+              "message": "在这台设备上装配音乐服务器",
+              "network_id": "00000000-0000-4000-8000-000000000021"
+            }
+          }
+        ]
+      },
+      "SocketResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "correlation_id",
+          "status_code"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "response"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status_code": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          },
+          "body": {}
+        },
+        "description": "body 按对应操作和状态码的响应 schema 验证；204 不带 body；订阅成功返回 SocketStreamOpened。",
+        "examples": [
+          {
+            "kind": "response",
+            "correlation_id": "00000000-0000-4000-8000-000000000011",
+            "status_code": 202,
+            "body": {
+              "run_id": "00000000-0000-4000-8000-000000000001",
+              "request_id": "00000000-0000-4000-8000-000000000041",
+              "session_id": "00000000-0000-4000-8000-000000000031",
+              "device_id": "00000000-0000-4000-8000-000000000022",
+              "status": "queued",
+              "created_at": "2026-09-07T00:00:00Z",
+              "started_at": null,
+              "finished_at": null,
+              "model": null,
+              "last_seq": 1,
+              "error": null,
+              "network_id": "00000000-0000-4000-8000-000000000021",
+              "input_message": "在这台设备上装配音乐服务器"
+            }
+          }
+        ]
+      },
+      "SocketStreamOpened": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subscription_id",
+          "run_id"
+        ],
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SocketEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "subscription_id",
+          "event"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "event"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event": {
+            "$ref": "#/components/schemas/RunEvent"
+          }
+        }
+      },
+      "SocketUnsubscribe": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "correlation_id",
+          "subscription_id"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "unsubscribe"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SocketStreamEnd": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "subscription_id",
+          "reason",
+          "error"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "stream_end"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "terminal",
+              "unsubscribed",
+              "transport_error"
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SocketFrame": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SocketRequest"
+          },
+          {
+            "$ref": "#/components/schemas/SocketResponse"
+          },
+          {
+            "$ref": "#/components/schemas/SocketEvent"
+          },
+          {
+            "$ref": "#/components/schemas/SocketUnsubscribe"
+          },
+          {
+            "$ref": "#/components/schemas/SocketStreamEnd"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        },
+        "examples": [
+          {
+            "kind": "request",
+            "correlation_id": "00000000-0000-4000-8000-000000000011",
+            "operation_id": "submit_run",
+            "target": {
+              "network_id": "00000000-0000-4000-8000-000000000021",
+              "device_id": "00000000-0000-4000-8000-000000000022"
+            },
+            "path_parameters": {
+              "session_id": "00000000-0000-4000-8000-000000000031"
+            },
+            "body": {
+              "request_id": "00000000-0000-4000-8000-000000000041",
+              "message": "在这台设备上装配音乐服务器",
+              "network_id": "00000000-0000-4000-8000-000000000021"
+            }
+          },
+          {
+            "kind": "event",
+            "subscription_id": "00000000-0000-4000-8000-000000000061",
+            "event": {
+              "run_id": "00000000-0000-4000-8000-000000000001",
+              "seq": 1,
+              "created_at": "2026-09-07T00:00:00Z",
+              "kind": "status",
+              "data": {
+                "status": "queued"
+              }
+            }
+          },
+          {
+            "kind": "stream_end",
+            "subscription_id": "00000000-0000-4000-8000-000000000061",
+            "reason": "terminal",
+            "error": null
+          }
+        ]
+      },
+      "StorageUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["device_id", "data_directory", "scanned_at", "total_bytes", "complete", "entries"],
+        "properties": {
+          "device_id": {"type": "string", "format": "uuid"},
+          "data_directory": {"type": "string"},
+          "scanned_at": {"type": "string", "format": "date-time"},
+          "total_bytes": {"type": "integer", "minimum": 0},
+          "complete": {"type": "boolean"},
+          "entries": {
+            "type": "array", "maxItems": 512,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["name", "kind", "bytes"],
+              "properties": {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": ["database", "database_auxiliary", "migration_backup", "file", "directory", "symlink", "runtime", "unreadable"]},
+                "bytes": {"type": ["integer", "null"], "minimum": 0}
+              }
+            }
+          }
+        }
+      },
+      "RoveApiInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "enum": [
+              "get_device",
+              "get_storage_usage",
+              "get_settings",
+              "update_settings",
+              "list_networks",
+              "get_network",
+              "list_network_devices",
+              "list_services",
+              "get_service",
+              "publish_service",
+              "update_service",
+              "unpublish_service"
+            ]
+          },
+          "path_parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "query_parameters": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "description": "调用本机 Rove API，参数再按指定 operationId 验证。不转发远端、不接受任意 HTTP URL。"
+      },
+      "ModelTestInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "model_id"
+            ],
+            "properties": {
+              "model_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "base_url",
+              "api_key",
+              "model"
+            ],
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "openai_compatible",
+                  "deepseek",
+                  "anthropic",
+                  "gemini",
+                  "moonshot",
+                  "zai",
+                  "minimax",
+                  "mistral",
+                  "xai",
+                  "openrouter",
+                  "groq",
+                  "ollama"
+                ]
+              },
+              "base_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "api_key": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "writeOnly": true,
+                    "maxLength": 16384
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          }
+        ]
+      },
+      "ModelTestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "available",
+          "tested_at"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "const": true
+          },
+          "tested_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ModelEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model_id",
+          "connection_id",
+          "name",
+          "model"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "保留旧配置的完整型号 ID；现代导入限制 256 字符。"
+          },
+          "tested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "当前配置最后一次成功推理测试时间；未测试、配置变更或后来失败时为 null，不保证未来可用。"
+          }
+        }
+      },
+      "ModelConnection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connection_id",
+          "provider",
+          "base_url",
+          "api_key_configured"
+        ],
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "api_key_configured": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ModelCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connections",
+          "models",
+          "default_model_id"
+        ],
+        "properties": {
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelConnection"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelEntry"
+            }
+          },
+          "default_model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "onboarding_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ModelSyncRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "network_id",
+              "device_id"
+            ],
+            "properties": {
+              "network_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "device_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "replace_connection_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "显式选择目标已有连接；必须同时确认 overwrite"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ModelSyncImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_device_id",
+          "source_connection_id",
+          "config"
+        ],
+        "properties": {
+          "source_device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ModelImport",
+            "description": "仅 API 连接，api_key 必须非空，set_default 必须为 false；所有型号须有名称"
+          },
+          "replace_connection_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "ModelConnectionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "base_url",
+          "api_key"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "openai_compatible",
+              "deepseek",
+              "anthropic",
+              "gemini",
+              "moonshot",
+              "zai",
+              "minimax",
+              "mistral",
+              "xai",
+              "openrouter",
+              "groq",
+              "ollama"
+            ]
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "writeOnly": true,
+                "maxLength": 16384
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ModelImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "base_url",
+          "api_key",
+          "models",
+          "set_default"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "openai_compatible",
+              "deepseek",
+              "anthropic",
+              "gemini",
+              "moonshot",
+              "zai",
+              "minimax",
+              "mistral",
+              "xai",
+              "openrouter",
+              "groq",
+              "ollama"
+            ]
+          },
+          "base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "writeOnly": true,
+                "maxLength": 16384
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "set_default": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ModelRename": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "DefaultModelWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ModelDiscovery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "models",
+          "truncated"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PendingSubmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "request",
+          "created_at",
+          "error"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RunSubmit"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PendingSubmissionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingSubmission"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "parameters": {
+      "NetworkId": {
+        "name": "network_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "SessionId": {
+        "name": "session_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RunId": {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ServiceId": {
+        "name": "service_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ContextNetwork": {
+        "name": "X-Rove-Network-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "接收连接的 overlay 网络上下文；非认证凭据。本机 socket 由运行时解析，不要求此 header。"
+      },
+      "TargetDevice": {
+        "name": "X-Rove-Target-Device-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "期望执行设备，接收者必须核对自身 device_id；不能据此转发第二跳。"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "错误码及处理见 api/README.md；字段校验失败、资源不存在、状态冲突、限流和依赖不可用返回对应 4xx/5xx。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-local-socket": {
+    "description": "所有 operationId 均可从本机 socket 调用；HTTP 上下文 header 由 SDK/接收运行时解析。见 local-socket.md。",
+    "frame_schema": {
+      "$ref": "#/components/schemas/SocketFrame"
+    },
+    "framing": "uint32 big-endian payload byte length + UTF-8 JSON",
+    "max_frame_bytes": 8388608
+  }
+}

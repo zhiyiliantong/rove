@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 async function openModels(page: import('@playwright/test').Page) { await page.goto('/#/models'); await page.getByRole('button',{name:'添加模型',exact:true}).click(); }
 test('all preset models are selected by default, users can deselect and switching selects only the new vendor',async({page})=>{
  await openModels(page);await expect(page.locator('.catalog-list input:checked')).toHaveCount(4);await expect(page.locator('.model-name-field input')).toHaveCount(4);

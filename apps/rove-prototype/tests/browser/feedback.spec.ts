@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 test.beforeEach(async ({ page }) => { await page.goto('/'); });
 test('network form hides random hex secret, supports DHCP, and independently probes editable peers', async ({ page }) => {
   const external: string[] = []; page.on('request', req => { if (req.url().startsWith('http') && !req.url().startsWith('http://127.0.0.1:4173')) external.push(req.url()); });

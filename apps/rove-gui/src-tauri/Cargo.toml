@@ -28,6 +28,11 @@ rove-agent.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 
+[target.'cfg(target_os = "android")'.dependencies]
+# reqwest 0.13 uses this verifier; Tauri's older verifier is a separate instance.
+rustls-platform-verifier = "=0.7.0"
+jni = "=0.22.4"
+
 [dev-dependencies]
 axum.workspace = true
 tauri = { version = "=2.11.5", features = ["test"] }

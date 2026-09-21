@@ -5,16 +5,19 @@ import InputNumber from 'primevue/inputnumber';
 import RadioButton from 'primevue/radiobutton';
 import { api, data, ui, navigate, perform, notice, modelLabel, addModel } from '../ui';
 import { startRoveManagement } from '../ui';
+import { introduction, resetIntroduction, restartIntroductionNow } from '../ui';
 import type { Scenario } from '../domain';
 defineProps<{ section: string }>();
 const dark = defineModel<boolean>('dark');
 const scenes = [{ label: '日常使用', value: 'daily' }, { label: '首次使用（空状态）', value: 'empty' }, { label: '设备离线', value: 'offline' }, { label: '任务 / 模型获取失败', value: 'failure' }, { label: '平台不支持', value: 'unsupported' }];
-function reset(scene: Scenario) { if (window.confirm('重置演示数据？将清除本原型内的会话、网络和模型，不影响真实 Rove。')) { perform(() => api.reset(scene)); navigate('/sessions'); notice('演示场景已重置。'); } }
+function reset(scene: Scenario) { if (window.confirm('重置演示数据？将清除本原型内的会话、网络和模型，不影响真实 Rove。')) { perform(() => api.reset(scene)); navigate('/sessions'); if (scene === 'empty') restartIntroductionNow(); notice('演示场景已重置。'); } }
 function remove(mid: string) { if (window.confirm('删除这个型号？其他共用连接的型号不会被删除，历史任务记录保留。')) perform(() => api.deleteModel(mid)); }
 </script>
 <template>
   <div class="page-container settings-page"><template v-if="section === 'models'"><Button label="返回设置" icon="pi pi-arrow-left" text @click="navigate('/settings')"/><div class="page-heading"><div><span class="eyebrow">MODELS & CONNECTIONS</span><h1>选一个合拍的模型。</h1><p class="muted">一份连接，多个型号。默认模型用于新会话。</p></div><Button label="添加模型" icon="pi pi-plus" @click="addModel"/></div><div v-for="connection in data.connections" :key="connection.id" class="settings-card"><div class="row-between"><div><h2>{{ connection.name }}</h2><p class="muted">{{ connection.provider }} · {{ connection.auth_kind === 'api_key' ? '演示 API 凭据' : '官方 Agent 认证演示' }}</p><code>{{ connection.base_url }}</code></div><Button label="编辑连接" icon="pi pi-pencil" text @click="ui.editConnection = connection.id; ui.modelDialog = true"/></div><div v-for="model in data.models.filter(m => m.connection_id === connection.id)" :key="model.id" class="model-row"><label class="check-row"><RadioButton :model-value="data.default_model_id" :value="model.id" name="default-model" :input-id="model.id" @update:model-value="perform(() => api.setDefaultModel(model.id))"/><strong>{{ model.name }}<small>{{ model.model }}</small></strong><span v-if="data.default_model_id === model.id" class="default-badge">默认</span></label><Button icon="pi pi-trash" text severity="secondary" :aria-label="`删除型号 ${model.model}`" @click="remove(model.id)"/></div></div><div v-if="!data.models.length" class="empty-state"><h2>还没有模型</h2><p>添加第一份连接后，自动开始初始化网络会话。</p><Button label="添加第一个模型" @click="addModel"/></div></template>
-    <template v-else><div class="page-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h1>设置</h1><p class="muted">应用外观与本机偏好。不改变其他设备。</p></div></div><section class="settings-card manage-rove-card" aria-labelledby="manage-rove-heading">
+    <template v-else><div class="page-heading"><div><span class="eyebrow">MAKE IT YOURS</span><h1>设置</h1><p class="muted">应用外观与本机偏好。不改变其他设备。</p></div></div>
+      <section class="settings-card"><div class="row-between"><div><h2>使用引导</h2><p>重新认识 Rove，了解如何添加模型、连接设备和开始对话。</p><small>{{ introduction.resetPending ? '已安排下次启动显示。刷新或重新打开原型即可查看。' : '下次启动重新显示，不清除模型、网络、设备和会话。' }}</small></div><Button label="重置使用引导" icon="pi pi-replay" outlined :disabled="introduction.resetPending" @click="resetIntroduction"/></div></section>
+      <section class="settings-card manage-rove-card" aria-labelledby="manage-rove-heading">
         <div class="row-between"><div><span class="eyebrow">通过对话管理 · 演示</span><h2 id="manage-rove-heading">设置不必自己找，告诉 Rove 你想怎么调整。</h2><p>试试：“看看空间占用”“调整存储位置”“排查连接问题”。</p></div><Button label="通过对话管理" icon="pi pi-comment" @click="startRoveManagement"/></div>
         <p class="muted">先从检查此设备开始，点击只会准备草稿。当前原型不会扫描磁盘、清理文件或迁移数据。</p>
         <small>正式接入后，涉及删除数据、迁移目录或中断服务时，会先说明影响，再由你确认。手动设置仍然保留。</small>

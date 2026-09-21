@@ -1,12 +1,17 @@
 mod ai;
 #[cfg(unix)]
 mod embedded;
+mod management;
+mod model_discovery;
+mod models;
+mod remote_sessions;
 #[cfg(unix)]
 pub use embedded::EmbeddedAgent;
 #[cfg(target_os = "linux")]
 pub mod http;
 #[cfg(target_os = "linux")]
 mod http_listener;
+mod network_probe;
 #[cfg(all(feature = "easytier", target_os = "linux"))]
 mod network_runtime;
 mod networks;
@@ -16,6 +21,7 @@ mod services;
 mod sessions;
 pub mod sharing;
 mod socket;
+mod storage_usage;
 pub mod store;
 pub mod tools;
 #[cfg(windows)]
@@ -32,6 +38,10 @@ pub struct Agent {
     runtime: sessions::Runtime,
     services: services::Runtime,
     network_lifecycle: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    remote_test_routes: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, url::Url>>,
+    #[cfg(test)]
+    remote_drop_submit_response: std::sync::atomic::AtomicBool,
     #[cfg(all(feature = "easytier", target_os = "linux"))]
     network_driver: std::sync::OnceLock<network_runtime::Driver>,
 }
@@ -41,6 +51,7 @@ fn capabilities() -> Vec<&'static str> {
         "network_config",
         "network_sharing",
         "ai_sessions",
+        "linked_sessions",
         "service_directory",
     ];
     if tools::supports_system_exec(std::env::consts::OS) {
@@ -58,6 +69,10 @@ impl Agent {
             runtime: sessions::Runtime::default(),
             services: services::Runtime::default(),
             network_lifecycle: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            remote_test_routes: Default::default(),
+            #[cfg(test)]
+            remote_drop_submit_response: Default::default(),
             #[cfg(all(feature = "easytier", target_os = "linux"))]
             network_driver: std::sync::OnceLock::new(),
         });
@@ -134,12 +149,22 @@ impl Agent {
             ));
         }
         let body = request.body.as_ref().unwrap_or(&Value::Null);
+        if let Some(result) = self.remote_session_operation(request).await? {
+            return Ok(result);
+        }
         let value = match request.operation_id.as_str() {
             "get_hello" => {
                 json!({"device_id":self.store.device_id,"display_name":"Rove device","agent_version":env!("CARGO_PKG_VERSION"),"protocol":{"min":1,"max":1},"capabilities":capabilities(),"network_id":null})
             }
             "get_device" => {
                 json!({"device_id":self.store.device_id,"display_name":"Rove device","agent_version":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"capabilities":capabilities(),"started_at":self.started_at})
+            }
+            "get_storage_usage" => {
+                let path = self.store.data_dir.clone();
+                let device = self.store.device_id.to_string();
+                tokio::task::spawn_blocking(move || storage_usage::inspect(&path, &device))
+                    .await
+                    .map_err(|e| storage_error(e.into()))??
             }
             "get_settings" => self.store.settings().map_err(storage_error)?,
             "update_settings" => {
@@ -167,30 +192,10 @@ impl Agent {
                 settings
             }
             "get_model_config" => self.store.model_state().map_err(storage_error)?,
-            "set_model_config" => {
-                let url = url::Url::parse(body["base_url"].as_str().unwrap())
-                    .map_err(|_| ApiError::invalid("Invalid model base URL"))?;
-                if !matches!(url.scheme(), "http" | "https")
-                    || !url.username().is_empty()
-                    || url.password().is_some()
-                    || url.fragment().is_some()
-                    || url.query().is_some()
-                {
-                    return Err(ApiError::invalid(
-                        "Model URL must be HTTP(S), without embedded credentials, query or fragment",
-                    ));
-                }
-                self.store
-                    .set("model_config", body)
-                    .map_err(storage_error)?;
-                self.store.model_state().map_err(storage_error)?
-            }
-            "clear_model_config" => {
-                self.store
-                    .set("model_config", &Value::Null)
-                    .map_err(storage_error)?;
-                return Ok((204, None));
-            }
+            "discover_models" => crate::model_discovery::discover(body).await?,
+            "test_model" => Box::pin(self.test_model(body)).await?,
+            "sync_model_connection" => return self.sync_model_connection(request).await,
+            op if op.contains("model") => return self.model_operation(request),
             op if op.contains("network") => return self.network_operation(request).await,
             op if op.contains("service") => return self.service_operation(request).await,
             op if op.contains("session") || op.contains("run") || op == "list_messages" => {
@@ -258,7 +263,23 @@ pub(crate) fn page(request: &Request, items: Vec<Value>, id_key: &str) -> Result
             v[id_key].as_str().unwrap_or("").to_string()
         }
     };
-    let mut matching = items.into_iter().filter(|v| key(v) > after).peekable();
+    let descending = request.operation_id == "list_sessions"
+        && request
+            .query_parameters
+            .get("order")
+            .and_then(Value::as_str)
+            == Some("desc");
+    let mut matching = items
+        .into_iter()
+        .filter(|v| {
+            after.is_empty()
+                || if descending {
+                    key(v) < after
+                } else {
+                    key(v) > after
+                }
+        })
+        .peekable();
     let mut selected = Vec::new();
     let mut size = 0;
     while let Some(item) = matching.peek() {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { seed } from '../../src/mock';
 
 for (const width of [320, 390, 1440]) {
@@ -8,6 +8,7 @@ for (const width of [320, 390, 1440]) {
     state.sessions[0]!.messages[0]!.text = '而换成复数：\n\n```text\ne^(inx)\n```\n\n平移就变成单纯乘：\n\n$$\ne^{in(x+a)} = e^{ina}e^{inx}\n$$\n\n所以复指数形式恰好把 **一个频率** 真正变成了一维群表示。\n\n```text\n' + 'long-code-'.repeat(50) + '\n```';
     await context.addInitScript(snapshot => {
       localStorage.setItem('rove-prototype-v1', JSON.stringify(snapshot));
+      localStorage.setItem('rove-prototype-introduction-v1', JSON.stringify({version:1,completed:true,step:3,resetPending:false}));
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
     }, state);
     const page = await context.newPage();

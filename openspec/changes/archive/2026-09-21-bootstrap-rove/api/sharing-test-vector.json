@@ -1,0 +1,25 @@
+{
+  "description": "仅供互操作验证，固定密钥和nonce只用于此测试向量；生产每次分享必须随机生成。",
+  "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+  "aad": "rove.network_join_config.v1",
+  "plaintext": {
+    "schema_version": 1,
+    "network_id": "00000000-0000-4000-8000-000000000021",
+    "display_name": "家庭网络",
+    "easytier": {
+      "network_name": "rove-family",
+      "network_secret": "example-network-secret-not-for-production",
+      "bootstrap_peers": [
+        "tcp://192.0.2.1:11010"
+      ],
+      "ipv4_cidr": "10.144.0.0/24",
+      "dhcp": true
+    }
+  },
+  "envelope": {
+    "schema_version": 1,
+    "algorithm": "aes-256-gcm",
+    "nonce": "AgICAgICAgICAgIC",
+    "ciphertext": "fPS6KiIyrJyMutm6L86t3ICP4MPJ3-gFquiSkCeSEF1NXS4HXV-T33cef9mvF2xWnkXu54pi7Rb7boOCUwR9ukTUodKU-z9EUzMmy5BwCVhUGTpMLooOp2PToi7m7TapzaL32Bp6Vf2BFjALZb2w70hnqH9szpmIMDLfykChDsNYQXdRqa4u_k2tYzF94Yg2j91TrqOuVy9iVmj01lQgon7WslLKobmU3OplLJ0vJXv3MOTzcdWSdTyzS5P9LXomUgUBDVkU40E0jELvysfSj4DgoQvRMb7NbCT5RE7fp3aoVcqBcfDox0UDqWU4lsnbxWRV0R9z4TYUNSzqMS9rLqmeAPgDFMqn-mVt2Nh-uLTnMETkf1fh8Du5yOM0q5rE2Ifqt97L3UH6ZVw7MgylPuM"
+  }
+}

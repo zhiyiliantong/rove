@@ -6,6 +6,7 @@ destination OS. The separate Tauri GUI package depends on this runtime package.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -57,7 +58,8 @@ def main():
             install(data, destination, 0o755)
 
         for name, destination in [("rove-agent", "/usr/lib/rove/rove-agent"), ("rove", "/usr/bin/rove")]:
-            build_dir = ROOT / "target" if host == target else ROOT / "target" / target
+            cache = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve()
+            build_dir = cache if host == target else cache / target
             executable((build_dir / profile / name).read_bytes(), destination)
         with zipfile.ZipFile(args.archive) as archive:
             for name in ["easytier-core", "easytier-cli"]:

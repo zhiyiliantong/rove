@@ -10,7 +10,10 @@ from jsonschema import Draft202012Validator, FormatChecker
 from openapi_spec_validator import validate
 
 ROOT = Path(__file__).resolve().parents[1]
-API = ROOT / "openspec/changes/bootstrap-rove/api"
+API = ROOT / "api"
+# The FR/US mapping is the frozen bootstrap acceptance baseline; current wire
+# contracts and capability specifications have stable, proposal-independent paths.
+BASELINE = ROOT / "openspec/changes/archive/2026-09-21-bootstrap-rove"
 documents = {}
 operations = set()
 refs = examples = 0
@@ -61,7 +64,7 @@ for case in cases:
     check = validator(document, document["components"]["schemas"][case["schema"]])
     assert check.is_valid(case["value"]) == case["valid"], case["schema"]
 
-assert len(operations) == 36, "Update acceptance mapping when the API changes"
+assert len(operations) == 52, "Update acceptance mapping when the API changes"
 parity = json.loads((ROOT / "docs/ui-parity.json").read_text())
 agent_operations = {node["operationId"] for node in walk(documents["rove-agent.openapi.json"]) if "operationId" in node}
 assert set(parity["operations"]) == agent_operations, "Synchronize GUI/CLI operation matrix"
@@ -70,8 +73,8 @@ for entry in parity["operations"].values():
     source = (ROOT / entry["source"]).resolve()
     assert source.is_relative_to(ROOT) and source.is_file()
 mapping = json.loads((ROOT / "docs/acceptance-map.json").read_text())
-requirements = (API.parent / "requirements.md").read_text()
-stories = (API.parent / "user-stories.md").read_text()
+requirements = (BASELINE / "requirements.md").read_text()
+stories = (BASELINE / "user-stories.md").read_text()
 assert set(mapping["requirements"]) == set(re.findall(r"^### (FR-\d+)", requirements, re.M))
 assert set(mapping["quality"]) == set(re.findall(r"\| (NFR-\d+)", requirements))
 mapped_operations, mapped_stories, mapped_specs = set(), set(), set()
@@ -86,7 +89,9 @@ for entry in mapping["requirements"].values():
         assert path.is_relative_to(ROOT) and path.is_file(), evidence
 assert mapped_operations == operations, "Synchronize endpoint acceptance mapping"
 assert mapped_stories == set(re.findall(r"^## (US-\d+)", stories, re.M))
-assert mapped_specs == {p.name for p in (API.parent / "specs").iterdir() if p.is_dir()}
+assert mapped_specs == {p.name for p in (BASELINE / "specs").iterdir() if p.is_dir()}
+for capability in mapped_specs:
+    assert (ROOT / "openspec/specs" / capability / "spec.md").is_file(), capability
 for entry in mapping["quality"].values():
     assert set(entry["requirements"]) <= set(mapping["requirements"])
     assert entry["status"] in {"partial", "verified_local", "not_verified"}
