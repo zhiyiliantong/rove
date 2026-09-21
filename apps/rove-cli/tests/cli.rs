@@ -50,6 +50,256 @@ fn success(output: std::process::Output) -> Value {
 }
 
 #[tokio::test]
+async fn session_list_defaults_to_descending_and_pages_in_both_directions() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("agent");
+    let agent = rove_agent::Agent::open(&path).unwrap();
+    let stop = CancellationToken::new();
+    let server = tokio::spawn(rove_agent::serve(agent.clone(), stop.clone()));
+    while !rove_sdk::socket_path(&path).exists() {
+        tokio::task::yield_now().await;
+    }
+    let older = success(invoke(&path, &["session", "create", "--title", "older"], None).await);
+    let newer = success(invoke(&path, &["session", "create", "--title", "newer"], None).await);
+    assert_eq!(newer["title_source"], "manual");
+    let first = success(invoke(&path, &["session", "list", "--limit", "1"], None).await);
+    assert_eq!(first["items"][0]["session_id"], newer["session_id"]);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = success(
+        invoke(
+            &path,
+            &["session", "list", "--limit", "1", "--cursor", cursor],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(second["items"][0]["session_id"], older["session_id"]);
+    assert!(second["next_cursor"].is_null());
+    let ascending = success(
+        invoke(
+            &path,
+            &["session", "list", "--order", "asc", "--limit", "1"],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(ascending["items"][0]["session_id"], older["session_id"]);
+    assert!(
+        !invoke(
+            &path,
+            &["session", "list", "--order", "asc", "--cursor", cursor],
+            None
+        )
+        .await
+        .status
+        .success()
+    );
+    assert!(
+        !invoke(&path, &["session", "list", "--order", "invalid"], None)
+            .await
+            .status
+            .success()
+    );
+    let automatic = success(
+        invoke(
+            &path,
+            &[
+                "session",
+                "create",
+                "--title",
+                "New conversation",
+                "--auto-title",
+            ],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(automatic["title_source"], "default");
+    let renamed = success(
+        invoke(
+            &path,
+            &[
+                "session",
+                "rename",
+                automatic["session_id"].as_str().unwrap(),
+                "My name",
+            ],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(renamed["title_source"], "manual");
+    stop.cancel();
+    server.await.unwrap().unwrap();
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn api_sync_cli_uses_explicit_targets_and_requires_overwrite_confirmation() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("sync-agent");
+    let agent = rove_agent::Agent::open(&path).unwrap();
+    let stop = CancellationToken::new();
+    let server = tokio::spawn(rove_agent::serve(agent.clone(), stop.clone()));
+    while !rove_sdk::socket_path(&path).exists() {
+        tokio::task::yield_now().await;
+    }
+    let snapshot = json!({"source_device_id":uuid::Uuid::new_v4(),"source_connection_id":uuid::Uuid::new_v4(),"config":{"provider":"deepseek","base_url":"https://api.deepseek.com","api_key":"cli-sync-private-fixture","models":[{"model":"test","name":"CLI 同步"}],"set_default":false}}).to_string();
+    let first = success(
+        invoke(
+            &path,
+            &["model", "receive-sync", "--body", "-"],
+            Some(&snapshot),
+        )
+        .await,
+    );
+    assert!(!first.to_string().contains("cli-sync-private-fixture"));
+    assert_eq!(
+        success(
+            invoke(
+                &path,
+                &["model", "receive-sync", "--body", "-"],
+                Some(&snapshot)
+            )
+            .await
+        ),
+        first
+    );
+    let id = first["connections"][0]["connection_id"].as_str().unwrap();
+    let missing = uuid::Uuid::new_v4().to_string();
+    let args = [
+        "model",
+        "sync",
+        id,
+        "--to-network",
+        &missing,
+        "--to-device",
+        &missing,
+    ];
+    let unavailable = invoke(&path, &args, None).await;
+    assert!(!unavailable.status.success());
+    assert!(String::from_utf8_lossy(&unavailable.stderr).contains("target_unreachable"));
+    let mut replace = args.to_vec();
+    replace.extend(["--replace-connection", id]);
+    let rejected = invoke(&path, &replace, None).await;
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--yes"));
+    assert_eq!(
+        success(invoke(&path, &["model", "list"], None).await),
+        first
+    );
+    stop.cancel();
+    server.await.unwrap().unwrap();
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn linked_session_cli_persists_pending_without_local_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("agent");
+    let agent = rove_agent::Agent::open(&path).unwrap();
+    let owner = agent.store.device_id.to_string();
+    let stop = CancellationToken::new();
+    let server = tokio::spawn(rove_agent::serve(agent.clone(), stop.clone()));
+    while !rove_sdk::socket_path(&path).exists() {
+        tokio::task::yield_now().await;
+    }
+    let storage = success(invoke(&path, &["device", "storage"], None).await);
+    let manual = success(
+        invoke(
+            &path,
+            &[
+                "network",
+                "create",
+                "manual-cli",
+                "--subnet",
+                "10.242.0.0/24",
+                "--local-ipv4",
+                "10.242.0.2",
+            ],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(manual["local_ipv4"], "10.242.0.2");
+    let exported = success(
+        invoke(
+            &path,
+            &["network", "export", manual["network_id"].as_str().unwrap()],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(exported["easytier"]["dhcp"], false);
+    assert!(!exported.to_string().contains("local_ipv4"));
+    let probe = success(
+        invoke(
+            &path,
+            &["network", "test-peer", "udp://127.0.0.1:11010"],
+            None,
+        )
+        .await,
+    );
+    assert_eq!(probe["status"], "unsupported");
+    assert_eq!(storage["device_id"], owner);
+    assert!(
+        storage["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["name"] == "rove.db")
+    );
+    let network = uuid::Uuid::new_v4().to_string();
+    let peer = uuid::Uuid::new_v4().to_string();
+    let id = uuid::Uuid::new_v4().to_string();
+    let args = [
+        "session",
+        "create",
+        "--title",
+        "remote",
+        "--session-id",
+        &id,
+        "--execution-network",
+        &network,
+        "--execution-device",
+        &peer,
+    ];
+    let created = success(invoke(&path, &args, None).await);
+    assert_eq!(created["device_id"], owner);
+    assert_eq!(created["execution_target"]["device_id"], peer);
+    assert_eq!(success(invoke(&path, &args, None).await)["session_id"], id);
+    let request = uuid::Uuid::new_v4().to_string();
+    let failed = invoke(
+        &path,
+        &[
+            "session",
+            "send",
+            &id,
+            "do not fall back",
+            "--request-id",
+            &request,
+        ],
+        None,
+    )
+    .await;
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("target_unreachable"));
+    let pending = success(invoke(&path, &["session", "pending", &id], None).await);
+    assert_eq!(pending["items"][0]["request"]["request_id"], request);
+    let jobs = success(invoke(&path, &["run", "list"], None).await);
+    assert_eq!(jobs["items"], json!([]));
+    success(invoke(&path, &["session", "archive", &id], None).await);
+    assert!(
+        !invoke(&path, &["session", "delete", &id, "--yes"], None)
+            .await
+            .status
+            .success()
+    );
+    stop.cancel();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn ai_commands_continue_watch_and_cancel_the_same_device_session() {
     use axum::{Router, response::IntoResponse, routing::post};
     use std::{sync::Arc, time::Duration};
@@ -181,6 +431,49 @@ async fn ai_commands_continue_watch_and_cancel_the_same_device_session() {
     assert_eq!(listed["items"][0]["run_id"], cancelled);
     let sessions = success(invoke(&path, &["session", "list"], None).await);
     assert_eq!(sessions["items"][0]["session_id"], id);
+    success(invoke(&path, &["session", "archive", id], None).await);
+    assert_eq!(
+        success(invoke(&path, &["session", "list", "--archived", "false"], None).await)["items"],
+        json!([])
+    );
+    assert_eq!(
+        success(invoke(&path, &["session", "list", "--archived", "true"], None).await)["items"][0]
+            ["session_id"],
+        id
+    );
+    success(invoke(&path, &["session", "restore", id], None).await);
+    assert!(success(invoke(&path, &["session", "show", id], None).await)["archived_at"].is_null());
+    success(invoke(&path, &["session", "archive", id], None).await);
+    assert!(
+        !invoke(&path, &["session", "delete", id], None)
+            .await
+            .status
+            .success()
+    );
+    success(invoke(&path, &["session", "delete", id, "--yes"], None).await);
+    assert!(
+        !invoke(&path, &["session", "show", id], None)
+            .await
+            .status
+            .success()
+    );
+    assert!(
+        !invoke(
+            &path,
+            &[
+                "session",
+                "send",
+                id,
+                "CLI first input",
+                "--request-id",
+                &request_id
+            ],
+            None
+        )
+        .await
+        .status
+        .success()
+    );
     stop.cancel();
     server.await.unwrap().unwrap();
     agent.shutdown().await;
@@ -403,6 +696,60 @@ async fn command_groups_stdin_pagination_and_target_isolation() {
     );
     success(invoke(&path, &["agent", "status"], None).await);
     success(invoke(&path, &["model", "clear"], None).await);
+    let imported=success(invoke(&path,&["model","import"],Some(&json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","api_key":"catalog-cli-secret","models":[{"model":"chat"},{"model":"fast"}],"set_default":true}).to_string())).await);
+    assert!(!imported.to_string().contains("catalog-cli-secret"));
+    let model_id = imported["models"][1]["model_id"].as_str().unwrap();
+    let connection_id = imported["connections"][0]["connection_id"]
+        .as_str()
+        .unwrap();
+    success(invoke(&path, &["model", "rename", model_id, "CLI 助手"], None).await);
+    success(invoke(&path, &["model", "default", model_id], None).await);
+    assert_eq!(
+        success(invoke(&path, &["model", "show"], None).await)["config"]["model"],
+        "fast"
+    );
+    let choice_session = success(
+        invoke(
+            &path,
+            &["session", "create", "--title", "choose model"],
+            None,
+        )
+        .await,
+    );
+    let choice_id = choice_session["session_id"].as_str().unwrap();
+    assert_eq!(
+        success(invoke(&path, &["session", "model", choice_id, model_id], None).await)["model_id"],
+        model_id
+    );
+    let updated=success(invoke(&path,&["model","update-connection",connection_id],Some(&json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:2/v1","api_key":null}).to_string())).await);
+    assert_eq!(updated["connections"][0]["api_key_configured"], false);
+    assert!(
+        !invoke(&path, &["model", "delete-connection", connection_id], None)
+            .await
+            .status
+            .success()
+    );
+    assert_eq!(
+        success(invoke(&path, &["model", "list"], None).await)["models"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    success(
+        invoke(
+            &path,
+            &["model", "delete-connection", connection_id, "--yes"],
+            None,
+        )
+        .await,
+    );
+    assert!(
+        success(invoke(&path, &["model", "list"], None).await)["models"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         success(
             invoke(

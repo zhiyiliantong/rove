@@ -8,10 +8,8 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const AGENT_OPENAPI: &str =
-    include_str!("../../../openspec/changes/bootstrap-rove/api/rove-agent.openapi.json");
-pub const BLOB_OPENAPI: &str =
-    include_str!("../../../openspec/changes/bootstrap-rove/api/rove-config-server.openapi.json");
+pub const AGENT_OPENAPI: &str = include_str!("../../../api/rove-agent.openapi.json");
+pub const BLOB_OPENAPI: &str = include_str!("../../../api/rove-config-server.openapi.json");
 
 #[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
 #[error("{code}: {message}")]

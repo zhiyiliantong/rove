@@ -1,8 +1,8 @@
-# Rove 原型 0.5 交接与真实接入边界
+# Rove 原型 0.6 交接与真实接入边界
 
 ## 状态
 
-2026-09-16 原型 0.6 新增会话归档管理（`conversation-archive-management`，待用户验收）。会话列表“更多”及详情可归档；会话区和设置进入归档管理，查看、恢复、确认永久删除。归档不会停止任务，详情只读；queued/running/cancelling 阻止删除，成功删除仅移除对应会话和任务历史，不删除服务。当前仍是浏览器 mock，不是正式 agent 能力；0.5 的历史验收和归档记录保持不变。
+2026-09-16 用户确认归档 `conversation-archive-management`，10/10 项任务完成，主规格已同步，归档位于 `openspec/changes/archive/2026-09-16-conversation-archive-management/`；同时授权返回 `bootstrap-rove` 按原型实现正式应用。会话列表“更多”及详情可归档；会话区和设置进入归档管理，查看、恢复、确认永久删除。归档不会停止任务，详情只读；queued/running/cancelling 阻止删除，成功删除仅移除对应会话和任务历史，不删除服务。原型仍是浏览器 mock，不是正式 agent 能力；0.5 的历史验收和归档记录保持不变。以下早期“尚未授权”均是当时的历史边界，本次正式迁移授权以本段为准。
 
 2026-09-16 验收定稿：用户明确回复“验收通过”，确认当前浏览器原型 0.5，包含第 17 组“管理 Rove”建议及设置页入口；`prototype-first-ui` 46/46 项完成。此确认不表示真实模型、跨设备部署、存储维护能力已实现或实机验收通过，也不授权正式 GUI/SDK 迁移。归档记录见 `openspec/changes/archive/2026-09-16-prototype-first-ui/`，两份原型规格同步至 `openspec/specs/`。4173 原型预览保留。
 
@@ -14,13 +14,13 @@
 
 2026-09-14：用户确认 Excalidraw 信息架构、批量模型关系、本机会话/目标执行分离、四字段网络名片，以及服务只通过会话管理；授权独立原型实施。没有授权修改现有 GUI 或真实后台。本次源码位于 `apps/rove-prototype`。
 
-验收基线为 PrimeVue 4.5.5、Aura 1.2.5、绿色/中性色主题，响应式断点 640 / 850 / 1100px。用户已确认原型视觉与交互，不自动进入真实应用迁移。依赖精确版本和间接依赖锁在该工程的 package-lock.json。
+验收基线为 PrimeVue 4.5.5、Aura 1.2.5、绿色/中性色主题，响应式断点 640 / 850 / 1100px。已按本次明确授权开始真实应用迁移，不能把原型验收当作原生平台验收。依赖精确版本和间接依赖锁在各工程的 package-lock.json。
 
 采用按需引入组件及主题 token 的方式，参考 [PrimeVue 安装说明](https://primevue.dev/vite/) 与 [主题说明](https://primevue.dev/theming/styled/)。当前网站已显示新版示例；本工程固定 4.x，不随网站最新大版本自动升级。依赖版本通过官方 npm 源核实，未修改用户全局 npm 镜像。
 
 ## 页面 / 协议对应
 
-真实来源：`openspec/changes/bootstrap-rove/api/rove-agent.openapi.json`。
+真实来源：`api/rove-agent.openapi.json`。
 新增语义：`apps/rove-prototype/api/prototype.openapi.json`（OpenAPI 3.1，版本 0.6，25 个操作；无对应 HTTP 服务器）。新增 `POST /sessions/{id}/archive`（归档）、`DELETE /sessions/{id}/archive`（恢复）、`DELETE /sessions/{id}`（永久删除已归档且无活跃任务的会话）。成功无正文 204；缺失记录 404；归档后写操作、未归档删除及活跃任务删除为 409，SessionError 含 code/status/message。快照 v4 增加 archived_at，迁移 v1/v2/v3，不重置 initialized。正式 agent 的归档持久化和跨设备任务约束仍须后续单独接入。
 
 | 页面或行为 | 既有 operationId | 尚缺的真实语义 |
@@ -38,9 +38,9 @@ PrototypeApi 的 `snapshot()` 聚合是原型便利接口，不建议直接把�
 
 ## 必须保留的 UX
 
-### 0.6 会话归档管理（2026-09-16，待验收）
+### 0.6 会话归档管理（2026-09-16，已确认归档）
 
-验证：45 项单元测试（含 7 项归档/迁移/契约测试）、44 项浏览器测试（含 5 项归档流程）、Vue 类型/生产构建、该变更及两份现有主规格 strict 校验全部通过。默认 Playwright 1243 浏览器未安装，指定本机已有 `chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell` 后完成全量测试，未升级依赖或停止 LAN 服务。`http://10.1.2.237:4173/` 在 320/390/1440px 自动化浏览器中 HTTP 200、无页面错误、无外部请求、无整页横向溢出，归档、取消删除、恢复可用；截图为 `apps/rove-prototype/test-results/lan-archives-*.png`。这些是开发机浏览器验证，不冒充手机或 Windows 实机验收；当前 0.6 仍待用户确认。
+验证：45 项单元测试（含 7 项归档/迁移/契约测试）、44 项浏览器测试（含 5 项归档流程）、Vue 类型/生产构建、该变更及两份现有主规格 strict 校验全部通过。默认 Playwright 1243 浏览器未安装，指定本机已有 `chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell` 后完成全量测试，未升级依赖或停止 LAN 服务。`http://10.1.2.237:4173/` 在 320/390/1440px 自动化浏览器中 HTTP 200、无页面错误、无外部请求、无整页横向溢出，归档、取消删除、恢复可用；截图为 `apps/rove-prototype/test-results/lan-archives-*.png`。这些是开发机浏览器验证，不冒充手机或 Windows 实机验收；原型 0.6 现已获归档确认，正式平台仍须实测。
 
 保留归档会话的原 ID、消息、草稿和执行引用，恢复不重放任务；重复归档保留初次时间。归档管理位于 `/archives`，仍属于会话主导航，不新增移动底部栏标签；包括空状态、长标题折行、已删除旧链接提示。删除确认列明不可恢复、消息/草稿/任务历史范围，取消和 Escape 均不变更数据；数据层独立验证可删除条件，不能绕过 UI 删除活跃任务上下文。
 
@@ -153,11 +153,11 @@ Gemini/Ollama 原生地址和 Z.ai 国际站配置来自本机固定版本的 `p
 
 浏览器演示快照不是现有 agent DTO。原型契约清楚标为未接入；单元测试校验快照，以及与旧 API 共用的状态词汇，不声称所有页面已经与真实 OpenAPI 兼容。
 
-## 后续迁移建议（不在当前授权范围）
+## 正式迁移计划（已授权，bootstrap-rove 第 13 组）
 
-1. 用户浏览器验收并记录版本、反馈；确认后再另行授权 Tauri 接入。
+1. 原型已确认并归档，保持独立预览；正式 GUI 首批迁移主题、导航和真实作业输出展示，不引入原型 mock。
 2. 为上述新增语义建立正式 OpenSpec / OpenAPI 变更，明确凭据权限边界、任务所有权和幂等恢复。
-3. 将页面、组件、主题提取为共享 UI；替换 `ui.ts` 注入的 PrototypeApi 实例，保留可独立运行的 mock 入口供回归测试。
+3. 将确认后的页面、组件和主题分阶段迁入正式 GUI，沿用 Tauri → SDK 桥接；测试专用 IPC fixture 只存在于浏览器测试，不接入生产代码。后续再评估共享 UI 包。
 4. GUI 与 CLI 同时映射到 rove-sdk，不让 GUI 绕过 SDK 直连 agent 或处理专有远程传输。
 5. 分别测试 Linux、Windows、Android 的安装升级、socket、overlay、任务后台存活及重连。新增验证不自动勾选 bootstrap-rove 未完成的任务。
 

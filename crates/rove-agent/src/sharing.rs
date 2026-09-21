@@ -21,17 +21,21 @@ pub fn validate_join(value: &Value) -> Result<(), ApiError> {
     }
     AGENT.validate("JoinConfig", value)?;
     let cfg = &value["easytier"];
-    // Preserve old development share payloads without claiming that their CIDR
-    // controls EasyTier DHCP. New configurations do not include this metadata.
+    // Old automatic-mode CIDR is metadata, never a DHCP pool request.
+    if cfg["dhcp"] == false && cfg.get("ipv4_cidr").is_none() {
+        return Err(ApiError::invalid(
+            "Manual addressing requires a network CIDR",
+        ));
+    }
     if let Some(cidr) = cfg.get("ipv4_cidr") {
         let cidr: ipnet::Ipv4Net = cidr.as_str().unwrap().parse().map_err(|_| {
-            ApiError::new(422, "invalid_network_config", "Invalid legacy IPv4 CIDR")
+            ApiError::new(422, "invalid_network_config", "Invalid IPv4 network CIDR")
         })?;
         if cidr.prefix_len() == 0 || cidr.prefix_len() > 30 || cidr.addr() != cidr.network() {
             return Err(ApiError::new(
                 422,
                 "invalid_network_config",
-                "Invalid legacy IPv4 CIDR",
+                "Invalid IPv4 network CIDR",
             ));
         }
     }
@@ -240,10 +244,8 @@ mod tests {
     use super::*;
     #[test]
     fn interoperable_and_tamper_safe() {
-        let vector: Value = serde_json::from_str(include_str!(
-            "../../../openspec/changes/bootstrap-rove/api/sharing-test-vector.json"
-        ))
-        .unwrap();
+        let vector: Value =
+            serde_json::from_str(include_str!("../../../api/sharing-test-vector.json")).unwrap();
         assert_eq!(
             decrypt(&vector["envelope"], vector["key"].as_str().unwrap()).unwrap(),
             vector["plaintext"]

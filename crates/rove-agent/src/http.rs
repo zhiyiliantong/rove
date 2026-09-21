@@ -121,6 +121,23 @@ fn check_main_routes(
     interface: &str,
     address: std::net::Ipv4Addr,
 ) -> std::io::Result<()> {
+    check_subnet_routes(routes, interface, ipnet::Ipv4Net::new(address, 32).unwrap())
+}
+
+#[cfg(feature = "easytier")]
+pub(crate) fn check_overlay_subnet(interface: &str, subnet: ipnet::Ipv4Net) -> std::io::Result<()> {
+    check_subnet_routes(
+        &std::fs::read_to_string("/proc/net/route")?,
+        interface,
+        subnet,
+    )
+}
+
+fn check_subnet_routes(
+    routes: &str,
+    interface: &str,
+    subnet: ipnet::Ipv4Net,
+) -> std::io::Result<()> {
     for line in routes.lines().skip(1) {
         let fields: Vec<_> = line.split_whitespace().collect();
         if fields.len() < 8 {
@@ -142,12 +159,13 @@ fn check_main_routes(
         let flags = parse(fields[3])?;
         // Default routes are expected for Internet access, not overlapping
         // specific prefixes. Every non-overlay, non-loopback specific route
-        // covering our own address is a conflict, including gateway routes.
+        // overlapping our subnet is a conflict, including gateway routes.
         if fields[0] != interface
             && fields[0] != "lo"
             && flags & 1 != 0
             && mask != 0
-            && destination & mask == u32::from(address) & mask
+            && ((destination & mask == u32::from(subnet.network()) & mask)
+                || subnet.contains(&std::net::Ipv4Addr::from(destination & mask)))
         {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AddrInUse,
@@ -342,6 +360,12 @@ async fn execute(
                     .parse::<u64>()
                     .map_err(|_| ApiError::invalid("Invalid numeric query parameter"))?,
             )
+        } else if key == "archived" {
+            Value::Bool(
+                value
+                    .parse::<bool>()
+                    .map_err(|_| ApiError::invalid("Invalid boolean query parameter"))?,
+            )
         } else {
             Value::String(value.into_owned())
         };
@@ -405,7 +429,7 @@ async fn execute(
             request.query_parameters.insert("after_seq".into(), after);
         }
         AGENT.request(&request)?;
-        return events(context, &request);
+        return events(context, &request).await;
     }
     let mut response = context.agent.handle(&request).await;
     if operation_id == "get_hello" && response.status_code == 200 {
@@ -415,14 +439,14 @@ async fn execute(
     Ok(json_response(response.status_code, response.body))
 }
 
-fn events(context: Context, request: &Request) -> Result<Response, ApiError> {
+async fn events(context: Context, request: &Request) -> Result<Response, ApiError> {
     let run_id = request.path_parameters["run_id"].clone();
     let after = request
         .query_parameters
         .get("after_seq")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let (initial, done) = context.agent.events_after(&run_id, after)?;
+    let (initial, done) = context.agent.read_events(&run_id, after).await?;
     if initial.is_empty() && done {
         return Ok(json_response(204, None));
     }
@@ -452,7 +476,7 @@ fn events(context: Context, request: &Request) -> Result<Response, ApiError> {
                     _ = context.stopping.cancelled() => return None,
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                 }
-                match context.agent.events_after(&run_id, after) {
+                match context.agent.read_events(&run_id, after).await {
                     Ok((values, terminal)) => {
                         pending = values.into();
                         done = terminal;
@@ -504,6 +528,23 @@ mod tests {
             .is_ok()
         );
         assert!(check_main_routes(&(header.to_owned() + "malformed\n"), "rove123", ip).is_err());
+        // A route can overlap our subnet even without covering our own address.
+        assert!(
+            check_subnet_routes(
+                &(header.to_owned() + &route),
+                "rove123",
+                "10.126.0.0/16".parse().unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            check_subnet_routes(
+                &(header.to_owned() + &route),
+                "rove123",
+                "10.127.0.0/16".parse().unwrap()
+            )
+            .is_ok()
+        );
     }
 
     // This listener tests HTTP serialization only, not overlay isolation. It is
@@ -581,9 +622,50 @@ mod tests {
         assert_eq!(read.body.unwrap()["title"], "remote session");
         let mut list = Request::new("list_sessions");
         list.query_parameters.insert("limit".into(), json!(1));
-        assert_eq!(sdk.call(list).await.unwrap().status_code, 200);
+        assert_eq!(sdk.call(list.clone()).await.unwrap().status_code, 200);
+        list.query_parameters
+            .insert("archived".into(), json!(false));
+        assert_eq!(
+            sdk.call(list.clone()).await.unwrap().body.unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            sdk.call(Request::new("archive_session").with_path("session_id", &session_id))
+                .await
+                .unwrap()
+                .status_code,
+            204
+        );
+        assert_eq!(
+            sdk.call(list.clone()).await.unwrap().body.unwrap()["items"],
+            json!([])
+        );
+        list.query_parameters.insert("archived".into(), json!(true));
+        assert_eq!(
+            sdk.call(list).await.unwrap().body.unwrap()["items"][0]["session_id"],
+            session_id
+        );
+        assert_eq!(
+            sdk.call(Request::new("restore_session").with_path("session_id", &session_id))
+                .await
+                .unwrap()
+                .status_code,
+            204
+        );
 
         let client = client(&context);
+        assert_eq!(
+            client
+                .get(format!("{base}/v1/sessions?archived=yes"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
         for header in ["x-rove-network-id", "x-rove-target-device-id"] {
             let response = client
                 .post(format!("{base}/v1/sessions"))
@@ -774,7 +856,14 @@ mod tests {
         let mut covered = std::collections::BTreeSet::new();
         for (id, operation) in &AGENT.operations {
             let mut request = Request::new(id);
-            for name in ["network_id", "session_id", "run_id", "service_id"] {
+            for name in [
+                "network_id",
+                "session_id",
+                "run_id",
+                "service_id",
+                "model_id",
+                "connection_id",
+            ] {
                 if operation.path.contains(&format!("{{{name}}}")) {
                     request.path_parameters.insert(name.into(), missing.clone());
                 }
@@ -785,6 +874,25 @@ mod tests {
                     json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","model":"test","api_key":null}),
                 ),
                 "create_network" => Some(json!({"display_name":"wire test"})),
+                "import_models" => Some(
+                    json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","api_key":null,"models":[{"model":"wire-test"}],"set_default":false}),
+                ),
+                "rename_model" => Some(json!({"name":"wire-test"})),
+                "sync_model_connection" => {
+                    Some(json!({"target":{"network_id":missing,"device_id":missing}}))
+                }
+                "receive_model_sync" => Some(
+                    json!({"source_device_id":missing,"source_connection_id":missing,"config":{"provider":"openai","base_url":"http://127.0.0.1:1/v1","api_key":null,"models":[{"model":"wire-test","name":"wire-test"}],"set_default":false}}),
+                ),
+                "discover_models" => Some(
+                    json!({"provider":"openai_compatible","base_url":"file:///invalid","api_key":null}),
+                ),
+                "test_model" => Some(json!({"model_id":missing})),
+                "set_default_model" => Some(json!({"model_id":null})),
+                "update_model_connection" => Some(
+                    json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","api_key":null}),
+                ),
+                "test_network_peer" => Some(json!({"endpoint":"udp://127.0.0.1:11010"})),
                 "import_network" => Some(json!({"source":"manual","config":join})),
                 "update_network" => {
                     Some(json!({"display_name":"wire test","easytier":join["easytier"]}))
@@ -833,7 +941,7 @@ mod tests {
             }
             covered.insert(id.clone());
         }
-        assert_eq!(covered.len(), 33);
+        assert_eq!(covered.len(), 49);
         // Expected errors deliberately exercise nonexistent resources without
         // external effects; happy-path SSE/sharing/service tests are separate.
         context.stopping.cancel();

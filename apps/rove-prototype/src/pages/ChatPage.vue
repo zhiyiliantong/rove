@@ -61,15 +61,11 @@ function send() {
 <template>
   <div class="chat-layout" :class="{ 'has-session': !!current }">
     <section class="conversation-list" aria-label="会话列表">
-      <div class="section-heading"><div><span class="eyebrow">CONVERSATIONS</span><h1>会话</h1></div><Button icon="pi pi-pen-to-square" text aria-label="添加会话" @click="newSession"/></div>
-      <p class="muted list-intro">想做什么，从这里开始。</p>
       <div v-for="s in activeSessions" :key="s.id" class="session-row">
         <button class="session-item" :class="{ selected: current?.id === s.id }" @click="navigate(`/sessions/${s.id}`)"><span class="session-icon"><i aria-hidden="true" :class="s.onboarding ? 'pi pi-compass' : 'pi pi-comment'"/></span><span><strong>{{ s.title }}</strong><small>{{ s.messages.at(-1)?.text }}</small></span></button>
         <SessionActions :id="s.id" :title="s.title"/>
       </div>
-      <div v-if="!activeSessions.length" class="list-empty">暂无会话<br/>可以添加会话，或从归档管理恢复。</div>
-      <Button class="archive-entry" label="归档管理" icon="pi pi-inbox" text @click="navigate('/archives')"/>
-      <div class="list-bottom"><i aria-hidden="true" class="pi pi-desktop"/> 会话由本机 rove-agent 承接</div>
+      <div v-if="!activeSessions.length" class="list-empty">暂无会话<br/>点击右上角 + 开始。</div>
     </section>
     <section v-if="current" class="conversation-detail" aria-label="会话详情">
       <div class="conversation-header"><Button icon="pi pi-arrow-left" text aria-label="返回会话列表" @click="navigate('/sessions')"/><div class="conversation-title"><h2>{{ current.title }}</h2><small>本机会话 · 执行设备：{{ deviceName(selectedTarget) }}</small></div><span class="local-badge">本机 agent</span><Button v-if="!archived" icon="pi pi-inbox" text aria-label="归档会话" @click="archiveSession(current.id)"/></div>
@@ -98,6 +94,6 @@ function send() {
       <div v-if="!archived" class="composer-area"><div v-if="attachmentNames.length" class="attachment-strip"><span v-for="name in attachmentNames" :key="name"><i aria-hidden="true" class="pi pi-paperclip"/> {{ name }}</span><Button icon="pi pi-times" text aria-label="移除附件" @click="attachmentNames = []"/></div><div class="composer"><Textarea v-model="draft" aria-label="消息" placeholder="例如：在书房电脑上安装音乐播放器…" rows="2" auto-resize @keydown.ctrl.enter="send" @keydown.meta.enter="send"/><div class="composer-toolbar"><div class="attachment-control"><Button text icon="pi pi-plus" aria-label="添加附件或选择模型" :aria-expanded="attachmentMenu" @click="attachmentMenu = !attachmentMenu"/><div v-if="attachmentMenu" class="menu-panel attachment-menu"><button v-if="mobilePlatform" @click="notice('拍照入口演示：本原型不调用相机，可使用照片或文件示例。'); attachmentMenu = false">拍照</button><button @click="fileInput?.click(); attachmentMenu = false">{{ mobilePlatform ? '照片 / 文件' : '文件' }}</button><button @click="chooseModel">模型</button></div></div><span class="composer-hint">Ctrl / ⌘ + Enter 发送</span><Button text icon="pi pi-microphone" aria-label="语音输入示例" @click="draft = '在书房电脑上安装音乐播放器'; notice('语音转文字示例已填入，请检查后发送；未录音。')"/><Button icon="pi pi-arrow-up" aria-label="发送消息" :disabled="!draft.trim() || !data.models.length" @click="send"/></div></div><div class="composer-context"><label>模型<Select ref="modelPicker" :model-value="current.model_id" :options="modelOptions" option-label="label" option-value="value" aria-label="会话模型" placeholder="选择模型" @update:model-value="value => perform(() => api.setSessionModel(current!.id, value))"/></label></div><p class="composer-footnote">演示数据 · 进度保存在此浏览器，不代表真实后台执行</p><input ref="fileInput" type="file" multiple hidden @change="files"/></div>
     </section>
     <section v-else-if="sid" class="empty-state"><h2>会话不存在或已删除</h2><p>这条会话无法打开，请返回列表。</p><Button label="返回会话列表" @click="navigate('/sessions')"/></section>
-    <section v-else class="welcome-panel"><div class="welcome-orbit"><i aria-hidden="true" class="pi pi-compass"/></div><span class="eyebrow">YOUR DEVICES. ONE CONVERSATION.</span><h2>你的设备，<br/>随你漫游。</h2><p class="data-slogan"><span>数据自己掌握，</span><span>跳出平台控制</span></p><p>无需记住命令，也不必守着进度。<br/>告诉 Rove 想做什么，让设备彼此协作。</p><Button v-if="!data.models.length" label="添加第一个模型" icon="pi pi-plus" @click="addModel"/><Button v-else label="开始一段会话" icon="pi pi-arrow-right" icon-pos="right" @click="newSession"/><ConversationSuggestions @select="chooseSuggestion"/></section>
+    <section v-else class="conversation-placeholder"><i class="pi pi-comments" aria-hidden="true"/><h2>从一段对话开始</h2><p>选择左侧会话，或从右上角 + 新建会话。</p></section>
   </div>
 </template>

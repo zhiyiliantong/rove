@@ -1,0 +1,54 @@
+import {test,expect} from '@playwright/test';
+import {bridge} from './bridge.mjs';
+
+test('empty onboarding is gated; key reveal and DeepSeek protocol work on a short screen',async({page})=>{
+  await page.setViewportSize({width:360,height:568});
+  await bridge(page,{intro:true,configured:false,empty:true});await page.goto('/');
+  await expect(page.getByRole('button',{name:'跳过引导',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'开始',exact:true}).click();
+  await expect(page.getByRole('button',{name:'下一步',exact:true})).toBeDisabled();
+  await page.locator('.intro-actions').getByRole('button',{name:'添加模型',exact:true}).click();
+  const dialog=page.getByRole('dialog').last(),key=dialog.getByLabel('API 密钥',{exact:true});
+  await dialog.getByLabel('提供商',{exact:true}).selectOption('deepseek');
+  await dialog.getByLabel('接口协议',{exact:true}).selectOption('anthropic');
+  await expect(dialog.getByLabel('接口地址',{exact:true})).toHaveValue('https://api.deepseek.com/anthropic');
+  await key.fill('fixture-not-a-real-key');await expect(key).toHaveAttribute('type','password');
+  await dialog.getByRole('button',{name:'显示 API 密钥',exact:true}).click();await expect(key).toHaveAttribute('type','text');
+  await dialog.getByRole('button',{name:'隐藏 API 密钥',exact:true}).click();await expect(key).toHaveAttribute('type','password');
+  await dialog.getByRole('button',{name:'获取可用型号',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'保存模型',exact:true})).toBeDisabled();
+  await page.evaluate(()=>{window.testBridge.failTest=true;});
+  await dialog.getByRole('button',{name:'测试模型',exact:true}).click();await expect(dialog.getByRole('alert')).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'保存模型',exact:true})).toBeDisabled();
+  await page.evaluate(()=>{window.testBridge.failTest=false;});
+  await dialog.getByRole('button',{name:'测试模型',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'保存模型',exact:true})).toBeEnabled();
+  await key.fill('changed-fixture');await expect(dialog.getByRole('button',{name:'保存模型',exact:true})).toBeDisabled();
+  await dialog.getByRole('button',{name:'测试模型',exact:true}).click();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const scroll=dialog.locator('.p-dialog-content');
+  expect(await scroll.evaluate(el=>el.scrollHeight>el.clientHeight)).toBe(true);
+  await dialog.getByRole('button',{name:'保存模型',exact:true}).click();
+  await expect(page.getByRole('button',{name:'跳过引导',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'跳过引导',exact:true}).click();await expect(page.locator('.introduction')).toHaveCount(0);
+  expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='submit_run'||c.operation_id==='create_session'))).toHaveLength(0);
+  expect(await page.evaluate(()=>JSON.stringify(localStorage))).not.toContain('changed-fixture');
+});
+
+test('intro opens only the add form even with saved models; cancellation preserves the gate',async({page})=>{
+  await bridge(page,{intro:true,verified:false});await page.goto('/');
+  await expect(page.getByRole('button',{name:'跳过引导',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'开始',exact:true}).click();
+  await page.getByRole('button',{name:'再添加模型',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await expect(page.getByRole('dialog').getByLabel('API 密钥',{exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog').locator('.model-entry')).toHaveCount(0);
+  await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'跳过引导',exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'再添加模型',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('API 密钥',{exact:true}).fill('fixture-only');
+  await page.getByRole('dialog').getByRole('button',{name:'测试模型',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'保存模型',exact:true}).click();
+  await expect(page.getByRole('button',{name:'跳过引导',exact:true})).toBeEnabled();
+});

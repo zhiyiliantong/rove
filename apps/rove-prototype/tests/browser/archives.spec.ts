@@ -1,10 +1,10 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import { createMockApi, seed } from '../../src/mock';
 import type { Snapshot } from '../../src/domain';
 
 async function install(page: Page, state: Snapshot) {
   await page.addInitScript(snapshot => {
-    if (!localStorage.getItem('rove-prototype-v1')) localStorage.setItem('rove-prototype-v1', JSON.stringify(snapshot));
+    if (!sessionStorage.getItem('custom-fixture')) { localStorage.setItem('rove-prototype-v1', JSON.stringify(snapshot)); sessionStorage.setItem('custom-fixture', '1'); }
   }, state);
 }
 async function saved(page: Page) { return page.evaluate(() => JSON.parse(localStorage.getItem('rove-prototype-v1')!)); }
@@ -25,7 +25,8 @@ for (const width of [390, 1440]) {
     }
     await expect(page.locator('.session-item')).toHaveCount(0);
     await expect(page.locator('.notice')).toContainText('归档不会取消');
-    await page.getByRole('button', { name: '归档管理', exact: true }).click();
+    await page.getByRole('button', { name: '全局添加' }).click();
+    await page.getByRole('menuitem', { name: '归档管理', exact: true }).click();
     await expect(page.getByRole('heading', { name: '归档管理', exact: true })).toBeVisible();
     await noOverflow(page); await page.reload();
     await page.getByRole('button', { name: '查看', exact: true }).click();

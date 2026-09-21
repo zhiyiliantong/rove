@@ -31,7 +31,7 @@ assert (ROOT / "apps/rove-gui/dist/index.html").is_file(), "Build the Vue fronte
 command = ["docker", "run", "--rm", "--name", "rove-native-" + uuid.uuid4().hex[:12], "--network", "none"]
 # Keep a workspace target symlink usable when build artifacts live on another
 # local volume. Mount only that artifact directory, never its parent directory.
-target_cache = (ROOT / "target").resolve()
+target_cache = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve()
 if not target_cache.is_relative_to(ROOT):
     assert target_cache.is_dir(), "External target cache must exist"
     assert target_cache.name == "target", "Expected a dedicated target artifact directory"
@@ -45,6 +45,7 @@ for source, target, readonly in [
     assert source.is_dir(), f"Missing cached build path: {source}"
     command.extend(["--mount", f"type=bind,source={source},target={target}" + (",readonly" if readonly else "")])
 command.extend([
+    "--env", f"CARGO_TARGET_DIR={target_cache}",
     "--env", f"PATH={toolchain}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "--workdir", str(ROOT), args.image,
     "cargo", "test" if args.test else "build" if args.build else "check", "--offline", "--locked", "-j", "2", "-p", "rove-gui", "--features", "custom-protocol",

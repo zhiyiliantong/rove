@@ -5,21 +5,60 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 impl Agent {
-    /// Caller holds network_lifecycle through the entire start/stop operation,
-    /// including future adapter awaits. Unknown/failed-but-enabled instances
-    /// retain the slot until their exit has been confirmed.
+    /// Caller holds network_lifecycle. Static CIDRs reserve their range;
+    /// automatic CIDRs are checked again against runtime facts before serving.
     fn check_network_join(&self, id: &str) -> Result<(), ApiError> {
         let db = self.store.connection.lock().unwrap();
-        let occupied: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM networks WHERE id<>?1 AND (COALESCE(json_extract(record,'$.enabled'),1)<>0 OR COALESCE(json_extract(record,'$.state'),'unknown')<>'stopped'))",
-            [id], |row| row.get(0),
-        ).map_err(|e| storage_error(e.into()))?;
-        if occupied {
-            return Err(ApiError::new(
-                409,
-                "network_already_joined",
-                "This device can join only one network; stop the current network first",
-            ));
+        let mut stmt = db.prepare("SELECT record,join_config FROM networks WHERE id<>?1 AND (COALESCE(json_extract(record,'$.enabled'),1)<>0 OR COALESCE(json_extract(record,'$.state'),'unknown')<>'stopped')")
+            .map_err(|e| storage_error(e.into()))?;
+        let rows = stmt
+            .query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| storage_error(e.into()))?;
+        let own: String = db
+            .query_row(
+                "SELECT join_config FROM networks WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|e| storage_error(e.into()))?;
+        let own: Value = serde_json::from_str(&own).map_err(|e| storage_error(e.into()))?;
+        let requested = (own["easytier"]["dhcp"] == false)
+            .then(|| {
+                own["easytier"]["ipv4_cidr"]
+                    .as_str()
+                    .and_then(|v| v.parse::<ipnet::Ipv4Net>().ok())
+            })
+            .flatten();
+        for row in rows {
+            let (record, config) = row.map_err(|e| storage_error(e.into()))?;
+            let record: Value =
+                serde_json::from_str(&record).map_err(|e| storage_error(e.into()))?;
+            let config: Value =
+                serde_json::from_str(&config).map_err(|e| storage_error(e.into()))?;
+            let other = record["overlay_cidr"]
+                .as_str()
+                .or_else(|| {
+                    (config["easytier"]["dhcp"] == false)
+                        .then(|| config["easytier"]["ipv4_cidr"].as_str())
+                        .flatten()
+                })
+                .and_then(|v| v.parse::<ipnet::Ipv4Net>().ok());
+            let Some(other) = other else {
+                return Err(ApiError::new(
+                    409,
+                    "network_address_pending",
+                    "Another network has no confirmed subnet; wait for its address or stop it",
+                ));
+            };
+            if requested.is_some_and(|own| subnets_overlap(own, other)) {
+                return Err(ApiError::new(
+                    409,
+                    "network_subnet_conflict",
+                    "Requested subnet overlaps another joined network",
+                ));
+            }
         }
         Ok(())
     }
@@ -98,14 +137,34 @@ impl Agent {
             .map(String::as_str)
             .unwrap_or("");
         let (status, value) = match request.operation_id.as_str() {
+            "test_network_peer" => (
+                200,
+                crate::network_probe::probe(body["endpoint"].as_str().unwrap()).await?,
+            ),
             "create_network" => {
                 let network_id = Uuid::new_v4();
                 let mut cfg = body.get("config").cloned().unwrap_or_else(|| json!({"network_name":format!("rove-{network_id}"),"network_secret":format!("{}{}",Uuid::new_v4().simple(),Uuid::new_v4().simple()),"bootstrap_peers":body.get("bootstrap_peers").cloned().unwrap_or(json!([])),"dhcp":true}));
                 if let Some(legacy) = body.get("ipv4_cidr") {
                     cfg["ipv4_cidr"] = legacy.clone();
                 }
-                let result = self.import_join(json!({"schema_version":1,"network_id":network_id,"display_name":body["display_name"],"easytier":cfg}))?;
-                (201, result["network"].clone())
+                let config = json!({"schema_version":1,"network_id":network_id,"display_name":body["display_name"],"easytier":cfg});
+                sharing::validate_join(&config)?;
+                validate_local_address(&config, body.get("local_ipv4"), false)?;
+                let result = self.import_join(config)?;
+                let mut record = result["network"].clone();
+                if let Some(address) = body.get("local_ipv4") {
+                    record["local_ipv4"] = address.clone();
+                }
+                self.store
+                    .connection
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE networks SET record=?2 WHERE id=?1",
+                        params![network_id.to_string(), record.to_string()],
+                    )
+                    .map_err(|e| storage_error(e.into()))?;
+                (201, record)
             }
             "import_network" => {
                 let config = if body["source"] == "manual" {
@@ -152,6 +211,16 @@ impl Agent {
                 config["display_name"] = body["display_name"].clone();
                 config["easytier"] = body["easytier"].clone();
                 sharing::validate_join(&config)?;
+                let local = body.get("local_ipv4").cloned().unwrap_or_else(|| {
+                    if config["easytier"]["dhcp"] == true {
+                        Value::Null
+                    } else {
+                        record["local_ipv4"].clone()
+                    }
+                });
+                validate_local_address(&config, Some(&local), false)?;
+                record["local_ipv4"] = local;
+                record["overlay_cidr"] = Value::Null;
                 record["display_name"] = body["display_name"].clone();
                 record["updated_at"] = json!(rove_core::now());
                 self.store
@@ -213,7 +282,8 @@ impl Agent {
                 (200, network)
             }
             "start_network" => {
-                self.network(id)?;
+                let (record, config) = self.network(id)?;
+                validate_local_address(&config, record.get("local_ipv4"), true)?;
                 self.check_network_join(id)?;
                 #[cfg(all(feature = "easytier", target_os = "linux"))]
                 if self.network_driver.get().is_some() {
@@ -229,6 +299,7 @@ impl Agent {
                     network["enabled"] = json!(true);
                     network["state"] = json!("starting");
                     network["overlay_addresses"] = json!([]);
+                    network["overlay_cidr"] = Value::Null;
                     network["last_error"] = Value::Null;
                     network["updated_at"] = json!(rove_core::now());
                     self.save_network_state(&network)?;
@@ -274,9 +345,134 @@ impl Agent {
     }
 }
 
+pub(crate) fn subnets_overlap(a: ipnet::Ipv4Net, b: ipnet::Ipv4Net) -> bool {
+    a.contains(&b.network()) || b.contains(&a.network())
+}
+
+pub(crate) fn validate_local_address(
+    config: &Value,
+    local: Option<&Value>,
+    required: bool,
+) -> Result<Option<std::net::Ipv4Addr>, ApiError> {
+    let local = local.and_then(Value::as_str);
+    if config["easytier"]["dhcp"] == true {
+        if local.is_some() {
+            return Err(ApiError::invalid(
+                "Automatic addressing does not accept a fixed local IPv4",
+            ));
+        }
+        return Ok(None);
+    }
+    let Some(local) = local else {
+        return if required {
+            Err(ApiError::new(
+                422,
+                "local_address_required",
+                "Set this device's static IPv4 before starting the manual network",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let address: std::net::Ipv4Addr = local
+        .parse()
+        .map_err(|_| ApiError::invalid("Invalid local IPv4"))?;
+    let subnet: ipnet::Ipv4Net = config["easytier"]["ipv4_cidr"]
+        .as_str()
+        .unwrap_or("")
+        .parse()
+        .map_err(|_| ApiError::invalid("Manual addressing requires a network CIDR"))?;
+    if !subnet.contains(&address)
+        || address == subnet.network()
+        || address == subnet.broadcast()
+        || address.is_loopback()
+        || address.is_unspecified()
+        || address.is_multicast()
+        || address.is_link_local()
+    {
+        return Err(ApiError::invalid(
+            "Local IPv4 must be a usable host address in the manual subnet",
+        ));
+    }
+    Ok(Some(address))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn manual_addresses_stay_local_and_overlap_checks_include_containment() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Agent::open(&directory.path().join("agent")).unwrap();
+        let config = json!({"network_name":"manual", "network_secret":"test-only", "bootstrap_peers":[], "dhcp":false, "ipv4_cidr":"192.168.100.0/24"});
+        let body = json!({"display_name":"manual", "config":config, "local_ipv4":"192.168.100.1"});
+        let response = agent
+            .handle(&Request::new("create_network").with_body(body.clone()))
+            .await;
+        assert_eq!(response.status_code, 201, "{response:?}");
+        let network = response.body.unwrap();
+        let id = network["network_id"].as_str().unwrap();
+        assert_eq!(network["local_ipv4"], "192.168.100.1");
+        let (_, join) = agent.network(id).unwrap();
+        assert!(join.get("local_ipv4").is_none());
+        assert!(join["easytier"].get("local_ipv4").is_none());
+        let other_directory = tempfile::tempdir().unwrap();
+        let other = Agent::open(&other_directory.path().join("agent")).unwrap();
+        assert_eq!(
+            other
+                .handle(
+                    &Request::new("import_network")
+                        .with_body(json!({"source":"manual", "config":join}))
+                )
+                .await
+                .status_code,
+            200
+        );
+        let response = other
+            .handle(&Request::new("start_network").with_path("network_id", id))
+            .await;
+        assert_eq!(
+            response.body.unwrap()["error"]["code"],
+            "local_address_required"
+        );
+        for address in ["192.168.100.0", "192.168.100.255", "192.168.101.1", "bad"] {
+            let mut invalid = body.clone();
+            invalid["local_ipv4"] = json!(address);
+            assert!(
+                agent
+                    .handle(&Request::new("create_network").with_body(invalid))
+                    .await
+                    .status_code
+                    >= 400
+            );
+        }
+        agent.store.connection.lock().unwrap().execute("UPDATE networks SET record=json_set(record,'$.enabled',json('true'),'$.state','running','$.overlay_cidr','192.168.100.0/24') WHERE id=?1", [id]).unwrap();
+        for (subnet, conflict) in [
+            ("192.168.0.0/16", true),
+            ("192.168.100.128/25", true),
+            ("192.168.101.0/24", false),
+        ] {
+            let mut cfg = config.clone();
+            cfg["ipv4_cidr"] = json!(subnet);
+            let created = agent
+                .handle(
+                    &Request::new("create_network")
+                        .with_body(json!({"display_name":"other", "config":cfg})),
+                )
+                .await
+                .body
+                .unwrap();
+            assert_eq!(
+                agent
+                    .check_network_join(created["network_id"].as_str().unwrap())
+                    .is_err(),
+                conflict
+            );
+        }
+        other.shutdown().await;
+        agent.shutdown().await;
+    }
 
     #[tokio::test]
     async fn saved_networks_are_not_memberships_and_new_shares_need_no_address_pool() {
@@ -317,7 +513,7 @@ mod tests {
                 assert_eq!(response.status_code, 409);
                 assert_eq!(
                     response.body.unwrap()["error"]["code"],
-                    "network_already_joined"
+                    "network_address_pending"
                 );
             }
             assert_eq!(agent.network(&ids[1]).unwrap().0["state"], "stopped");

@@ -6,7 +6,7 @@ import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import RadioButton from 'primevue/radiobutton';
-import { api, data, ui, perform, navigate, notice } from '../ui';
+import { api, data, ui, perform, navigate, notice, modelSavedInIntroduction } from '../ui';
 import { validateEndpoint } from '../mock';
 import { providerConfig, RIG_VERSION } from '../providers';
 import { generatedModelNames } from '../model-catalog';
@@ -57,7 +57,9 @@ function save() {
     }
     perform(() => undefined); ui.modelDialog = false;
     const onboarding = data.value.sessions.find(s => s.onboarding);
-    if (onboarding && !data.value.networks.length) navigate(`/sessions/${onboarding.id}`); else navigate('/models');
+    if (!modelSavedInIntroduction()) {
+      if (onboarding && !data.value.networks.length) navigate(`/sessions/${onboarding.id}`); else navigate('/models');
+    }
     notice(editing.value ? '共享连接已更新，引用它的型号同步生效。' : '演示模型已保存，没有发送接口请求或保存真实密钥。');
   } catch (e) { error.value = (e as Error).message; }
 }

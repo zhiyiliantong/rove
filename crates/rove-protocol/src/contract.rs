@@ -177,7 +177,7 @@ mod tests {
     use super::*;
     #[test]
     fn all_contract_examples() {
-        assert_eq!(AGENT.operations.len(), 33);
+        assert_eq!(AGENT.operations.len(), 49);
         assert_eq!(BLOBS.operations.len(), 3);
         for (source, contract) in [(AGENT_OPENAPI, &*AGENT), (BLOB_OPENAPI, &*BLOBS)] {
             let root: Value = serde_json::from_str(source).unwrap();
@@ -187,10 +187,8 @@ mod tests {
                 }
             }
         }
-        let cases: Value = serde_json::from_str(include_str!(
-            "../../../openspec/changes/bootstrap-rove/api/contract-examples.json"
-        ))
-        .unwrap();
+        let cases: Value =
+            serde_json::from_str(include_str!("../../../api/contract-examples.json")).unwrap();
         for case in cases["cases"].as_array().unwrap() {
             let contract = if case["api"] == "rove-agent.openapi.json" {
                 &*AGENT

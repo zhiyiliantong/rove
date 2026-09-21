@@ -148,8 +148,7 @@ impl Generator {
 }
 
 fn main() {
-    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../openspec/changes/bootstrap-rove/api");
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../api");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     for (module, filename, contract) in [
         ("agent", "rove-agent.openapi.json", "AGENT"),

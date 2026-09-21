@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonSlurper
 
 plugins {
     id("com.android.application")
@@ -58,6 +59,25 @@ rust {
 }
 
 dependencies {
+    // Resolve the Kotlin verifier from the exact Cargo dependency, not a
+    // machine-specific cache path or an independently versioned download.
+    val metadata = providers.exec {
+        workingDir(projectDir)
+        commandLine("cargo", "metadata", "--locked", "--format-version", "1",
+            "--filter-platform", "aarch64-linux-android", "--manifest-path", "../../../Cargo.toml")
+    }.standardOutput.asText.get()
+    val packages = (JsonSlurper().parseText(metadata) as Map<*, *>)["packages"] as List<*>
+    val verifier = packages.map { it as Map<*, *> }.single { it["name"] == "rustls-platform-verifier-android" }
+    val verifierManifest = file(verifier["manifest_path"] as String)
+    val verifierRepository = project.repositories.maven {
+        url = uri(verifierManifest.parentFile.resolve("maven"))
+        metadataSources { mavenPom(); artifact() }
+    }
+    project.repositories.exclusiveContent {
+        forRepositories(verifierRepository)
+        filter { includeGroup("rustls") }
+    }
+    implementation("rustls:rustls-platform-verifier:${verifier["version"]}")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

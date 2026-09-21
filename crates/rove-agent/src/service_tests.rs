@@ -98,6 +98,56 @@ async fn publication_is_fail_closed_then_forwards_and_unpublishes_idempotently()
 }
 
 #[tokio::test]
+async fn management_tool_updates_and_unpublishes_without_stopping_application() {
+    let (_temp, agent, network) = setup().await;
+    let (application, server) = echo().await;
+    agent
+        .services
+        .0
+        .lock()
+        .await
+        .addresses
+        .insert(network.clone(), "127.0.0.1".parse().unwrap());
+    let published = crate::management::call(
+        &agent,
+        &json!({"operation_id":"publish_service","body":body(&network,application)}),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let id = published["service_id"].as_str().unwrap();
+    let mut update = body(&network, application);
+    update["name"] = json!("Renamed through dialogue");
+    let updated = crate::management::call(
+        &agent,
+        &json!({"operation_id":"update_service","path_parameters":{"service_id":id},"body":update}),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(updated["name"], "Renamed through dialogue");
+    roundtrip(endpoint(&updated)).await;
+    let listed = crate::management::call(
+        &agent,
+        &json!({"operation_id":"list_services","query_parameters":{"network_id":network}}),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(listed["items"][0]["service_id"], id);
+    crate::management::call(
+        &agent,
+        &json!({"operation_id":"unpublish_service","path_parameters":{"service_id":id}}),
+    )
+    .await
+    .unwrap();
+    assert!(TcpStream::connect(endpoint(&updated)).await.is_err());
+    roundtrip(application).await;
+    server.abort();
+    agent.shutdown().await;
+}
+
+#[tokio::test]
 async fn update_conflicts_and_failed_persistence_keep_old_listener() {
     let (_temp, agent, network) = setup().await;
     agent

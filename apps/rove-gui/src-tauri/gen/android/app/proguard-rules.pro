@@ -19,3 +19,5 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Loaded via JNI; shrinking must not remove the Android certificate verifier.
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }

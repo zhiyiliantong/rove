@@ -1,14 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 test.beforeEach(async ({ page }) => { page.on('dialog', dialog => dialog.accept()); await page.goto('/'); });
 test('first model batch starts onboarding only once and exports a demo card', async ({ page }) => {
   await page.goto('/#/settings');
   await page.getByRole('combobox', { name: '演示场景' }).click();
   await page.getByRole('option', { name: '首次使用（空状态）' }).click();
-  await page.getByRole('button', { name: '添加第一个模型', exact: true }).click();
+  await page.getByRole('button', { name: '开始', exact: true }).click();
+  await page.getByRole('button', { name: '添加模型', exact: true }).click();
   await page.getByRole('button', { name: '模拟验证并获取型号' }).click();
   await page.getByRole('button', { name: '保存模型' }).click();
-  await expect(page.getByRole('heading', { name: '初始化网络' })).toBeVisible();
-  await page.getByRole('button', { name: '创建我的网络' }).click();
+  await expect(page.getByRole('heading', { name: '让设备，彼此相连' })).toBeVisible();
+  await page.getByRole('button', { name: '创建网络', exact: true }).click();
   await page.getByLabel('网络名称', { exact: true }).fill('我们的网络');
   await page.getByRole('button', { name: '保存网络' }).click();
   await expect(page.getByRole('dialog', { name: '网络名片' })).toBeVisible();
@@ -18,7 +19,9 @@ test('first model batch starts onboarding only once and exports a demo card', as
   expect(url).not.toContain('credential_ref');
   await page.keyboard.press('Escape');
   await page.reload();
-  await expect(page.getByRole('heading', { name: '我们的网络', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '让设备，彼此相连' })).toBeVisible();
+  await expect(page.locator('.intro-network-status')).toContainText('已保存 1 个演示网络');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('rove-prototype-v1')!).sessions.filter((s: any) => s.onboarding).length)).toBe(1);
 });
 test('remote task persists across reload; offline state does not duplicate submission', async ({ page }) => {
   await page.goto('/#/sessions/welcome');
@@ -125,8 +128,8 @@ test('keyboard skip link, modal escape, and long labels remain usable on mobile'
   await page.reload();
   for (const route of ['/models', '/networks', '/networks/home', '/services']) { await page.goto(`/#${route}`); await page.waitForTimeout(200); await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), { message: route }).toBe(true); }
 });
-test('touch navigation and form controls on mobile browser', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: 'http://127.0.0.1:4173' });
+test('touch navigation and form controls on mobile browser', async ({ browser, storageState }) => {
+  const context = await browser.newContext({ storageState, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: 'http://127.0.0.1:4173' });
   try {
     const page = await context.newPage();
     await page.goto('/');

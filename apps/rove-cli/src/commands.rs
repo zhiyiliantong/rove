@@ -40,6 +40,16 @@ pub enum Network {
         name: String,
         #[arg(long)]
         bootstrap_peer: Vec<String>,
+        /// Use manual addressing in this subnet instead of EasyTier DHCP.
+        #[arg(long)]
+        subnet: Option<String>,
+        /// This device's static host IP, never included in shared configuration.
+        #[arg(long, requires = "subnet")]
+        local_ipv4: Option<String>,
+    },
+    /// Test TCP reachability only; no network join or credential exchange.
+    TestPeer {
+        endpoint: String,
     },
     /// Import a share URL; use '-' to read it from stdin without shell history.
     Join {
@@ -56,7 +66,7 @@ pub enum Network {
         #[arg(long, default_value = "-")]
         body: String,
     },
-    /// Join this network. Stop the current network before joining another.
+    /// Join this network if its actual subnet does not overlap another network.
     Start {
         network_id: Uuid,
     },
@@ -92,12 +102,20 @@ impl Network {
             Self::Create {
                 name,
                 bootstrap_peer,
+                subnet,
+                local_ipv4,
             } => {
                 let mut body = json!({"display_name":name});
-                if !bootstrap_peer.is_empty() {
+                if let Some(subnet) = subnet {
+                    body["config"] = json!({"network_name":format!("rove-{}",Uuid::new_v4()),"network_secret":format!("{}{}",Uuid::new_v4().simple(),Uuid::new_v4().simple()),"bootstrap_peers":bootstrap_peer,"dhcp":false,"ipv4_cidr":subnet});
+                    body["local_ipv4"] = json!(local_ipv4);
+                } else if !bootstrap_peer.is_empty() {
                     body["bootstrap_peers"] = json!(bootstrap_peer);
                 }
                 Request::new("create_network").with_body(body)
+            }
+            Self::TestPeer { endpoint } => {
+                Request::new("test_network_peer").with_body(json!({"endpoint":endpoint}))
             }
             Self::Join { url } => Request::new("import_network")
                 .with_body(json!({"source":"url","url":input(&url)?.trim()})),
@@ -137,6 +155,8 @@ impl Network {
 #[derive(Subcommand)]
 pub enum Device {
     Show,
+    /// Inspect Rove-owned storage metadata; does not read secrets or clean files.
+    Storage,
     List {
         network_id: Uuid,
         #[command(flatten)]
@@ -147,6 +167,7 @@ impl Device {
     pub fn request(self) -> Request {
         match self {
             Self::Show => Request::new("get_device"),
+            Self::Storage => Request::new("get_storage_usage"),
             Self::List { network_id, page } => {
                 page.apply(Request::new("list_network_devices").with_path("network_id", network_id))
             }
@@ -157,6 +178,58 @@ impl Device {
 #[derive(Subcommand)]
 pub enum Model {
     Show,
+    List,
+    /// Copy an API connection and all its models to one explicitly selected peer.
+    Sync {
+        connection_id: Uuid,
+        #[arg(long)]
+        to_network: Uuid,
+        #[arg(long)]
+        to_device: Uuid,
+        /// Replace this existing target connection; requires --yes.
+        #[arg(long)]
+        replace_connection: Option<Uuid>,
+        /// Confirm overwriting changed target configuration (never account login).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Receive an API sync snapshot from private stdin (agent-to-agent parity).
+    ReceiveSync {
+        #[arg(long, default_value = "-")]
+        body: String,
+    },
+    /// Query provider model IDs without storing credentials.
+    Discover {
+        #[arg(long, default_value = "-")]
+        body: String,
+    },
+    /// Test inference without tools; credentials or model_id are read from stdin.
+    Test {
+        #[arg(long, default_value = "-")]
+        body: String,
+    },
+    /// Add one API connection and multiple models; credentials are read from stdin.
+    Import {
+        #[arg(long, default_value = "-")]
+        body: String,
+    },
+    Rename {
+        model_id: Uuid,
+        name: String,
+    },
+    Default {
+        model_id: Option<Uuid>,
+    },
+    UpdateConnection {
+        connection_id: Uuid,
+        #[arg(long, default_value = "-")]
+        body: String,
+    },
+    DeleteConnection {
+        connection_id: Uuid,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Replace model configuration with ModelConfigWrite JSON; stdin is private.
     Set {
         #[arg(long, default_value = "-")]
@@ -168,6 +241,53 @@ impl Model {
     pub fn request(self) -> anyhow::Result<Request> {
         Ok(match self {
             Self::Show => Request::new("get_model_config"),
+            Self::List => Request::new("get_model_catalog"),
+            Self::Sync {
+                connection_id,
+                to_network,
+                to_device,
+                replace_connection,
+                yes,
+            } => {
+                anyhow::ensure!(
+                    replace_connection.is_none() || yes,
+                    "Use --yes to confirm replacing the selected target connection"
+                );
+                let mut body = json!({"target":{"network_id":to_network,"device_id":to_device},"overwrite":yes});
+                if let Some(id) = replace_connection {
+                    body["replace_connection_id"] = json!(id);
+                }
+                Request::new("sync_model_connection")
+                    .with_path("connection_id", connection_id)
+                    .with_body(body)
+            }
+            Self::ReceiveSync { body } => {
+                Request::new("receive_model_sync").with_body(json_input(&body)?)
+            }
+            Self::Discover { body } => {
+                Request::new("discover_models").with_body(json_input(&body)?)
+            }
+            Self::Test { body } => Request::new("test_model").with_body(json_input(&body)?),
+            Self::Import { body } => Request::new("import_models").with_body(json_input(&body)?),
+            Self::Rename { model_id, name } => Request::new("rename_model")
+                .with_path("model_id", model_id)
+                .with_body(json!({"name":name})),
+            Self::Default { model_id } => {
+                Request::new("set_default_model").with_body(json!({"model_id":model_id}))
+            }
+            Self::UpdateConnection {
+                connection_id,
+                body,
+            } => Request::new("update_model_connection")
+                .with_path("connection_id", connection_id)
+                .with_body(json_input(&body)?),
+            Self::DeleteConnection { connection_id, yes } => {
+                anyhow::ensure!(
+                    yes,
+                    "Use --yes to remove this connection and all its model entries; history is retained"
+                );
+                Request::new("delete_model_connection").with_path("connection_id", connection_id)
+            }
             Self::Set { body } => Request::new("set_model_config").with_body(json_input(&body)?),
             Self::Clear => Request::new("clear_model_config"),
         })

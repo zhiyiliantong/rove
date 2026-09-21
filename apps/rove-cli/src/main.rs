@@ -52,7 +52,7 @@ enum Command {
     Status,
     /// List every OpenAPI operation and its HTTP mapping.
     Operations,
-    /// Sessions belong to the execution device.
+    /// Origin-owned conversations, optionally linked to a remote execution peer.
     Session {
         #[command(subcommand)]
         command: SessionCommand,
@@ -81,12 +81,45 @@ enum AgentCommand {
 #[derive(Subcommand)]
 enum SessionCommand {
     List {
+        #[arg(long)]
+        archived: Option<bool>,
+        /// Sort by creation time, newest first by default.
+        #[arg(long, default_value = "desc", value_parser = ["asc", "desc"])]
+        order: String,
         #[command(flatten)]
         page: commands::Page,
+    },
+    Archive {
+        session_id: Uuid,
+    },
+    Restore {
+        session_id: Uuid,
+    },
+    /// Permanently delete an archived, inactive conversation (not deployed files).
+    Delete {
+        session_id: Uuid,
+        #[arg(long, required = true)]
+        yes: bool,
     },
     Create {
         #[arg(long)]
         title: Option<String>,
+        /// Treat the initial title as a placeholder until the first accepted message.
+        #[arg(long)]
+        auto_title: bool,
+        #[arg(long, requires = "execution_device")]
+        execution_network: Option<Uuid>,
+        #[arg(long, requires = "execution_network")]
+        execution_device: Option<Uuid>,
+        /// Stable creation ID for safely retrying a lost response.
+        #[arg(long)]
+        session_id: Option<Uuid>,
+    },
+    /// List persisted, unconfirmed remote requests; never resubmits them.
+    Pending {
+        session_id: Uuid,
+        #[command(flatten)]
+        page: commands::Page,
     },
     Show {
         session_id: Uuid,
@@ -100,11 +133,18 @@ enum SessionCommand {
         session_id: Uuid,
         title: String,
     },
+    /// Persist a model choice for this session; omit model_id to follow device default.
+    Model {
+        session_id: Uuid,
+        model_id: Option<Uuid>,
+    },
     Send {
         session_id: Uuid,
         message: String,
         #[arg(long)]
         request_id: Option<Uuid>,
+        #[arg(long)]
+        model_id: Option<Uuid>,
     },
 }
 #[derive(Subcommand)]
@@ -156,22 +196,79 @@ async fn run() -> anyhow::Result<()> {
     let mut show_qr = false;
     let mut open_endpoint = None;
     let mut request = match args.command.unwrap_or(Command::Interactive) {
-        Command::Interactive => return interactive::run(&client,target,args.json).await,
-        Command::Network {command} => { let (request,qr)=command.request()?; show_qr=qr; request },
-        Command::Device {command} => command.request(),
-        Command::Model {command} => command.request()?,
-        Command::Config {command} => command.request()?,
-        Command::Service {command} => {if let commands::Service::Open{endpoint,..}=&command {open_endpoint=Some(*endpoint);} command.request()?},
+        Command::Interactive => return interactive::run(&client, target, args.json).await,
+        Command::Network { command } => {
+            let (request, qr) = command.request()?;
+            show_qr = qr;
+            request
+        }
+        Command::Device { command } => command.request(),
+        Command::Model { command } => command.request()?,
+        Command::Config { command } => command.request()?,
+        Command::Service { command } => {
+            if let commands::Service::Open { endpoint, .. } = &command {
+                open_endpoint = Some(*endpoint);
+            }
+            command.request()?
+        }
         Command::Operations => {
             let values: Vec<_> = rove_protocol::contract::AGENT.operations.iter().map(|(id,op)| serde_json::json!({"operation_id":id,"method":op.method,"path":op.path})).collect();
             println!("{}", serde_json::to_string_pretty(&values)?);
             return Ok(());
         }
-        Command::Status | Command::Agent { command: AgentCommand::Status } => Request::new("get_device"),
+        Command::Status
+        | Command::Agent {
+            command: AgentCommand::Status,
+        } => Request::new("get_device"),
         Command::Session { command } => match command {
-            SessionCommand::List {page} => page.apply(Request::new("list_sessions")),
-            SessionCommand::Create { title } => Request::new("create_session")
-                .with_body(title.map_or(json!({}), |title| json!({"title":title}))),
+            SessionCommand::List {
+                page,
+                archived,
+                order,
+            } => {
+                let mut request = page.apply(Request::new("list_sessions"));
+                request
+                    .query_parameters
+                    .insert("order".into(), json!(order));
+                if let Some(value) = archived {
+                    request
+                        .query_parameters
+                        .insert("archived".into(), json!(value));
+                }
+                request
+            }
+            SessionCommand::Archive { session_id } => {
+                Request::new("archive_session").with_path("session_id", session_id.to_string())
+            }
+            SessionCommand::Restore { session_id } => {
+                Request::new("restore_session").with_path("session_id", session_id.to_string())
+            }
+            SessionCommand::Delete { session_id, yes: _ } => {
+                Request::new("delete_session").with_path("session_id", session_id.to_string())
+            }
+            SessionCommand::Create {
+                title,
+                auto_title,
+                execution_network,
+                execution_device,
+                session_id,
+            } => {
+                let mut body = title.map_or(json!({}), |title| json!({"title":title}));
+                if auto_title {
+                    body["auto_title"] = json!(true);
+                }
+                if let Some((network_id, device_id)) = execution_network.zip(execution_device) {
+                    body["execution_target"] =
+                        json!({"network_id":network_id,"device_id":device_id});
+                }
+                if let Some(id) = session_id {
+                    body["session_id"] = json!(id);
+                }
+                Request::new("create_session").with_body(body)
+            }
+            SessionCommand::Pending { session_id, page } => page.apply(
+                Request::new("list_session_submissions").with_path("session_id", session_id),
+            ),
             SessionCommand::Show { session_id } => {
                 Request::new("get_session").with_path("session_id", session_id)
             }
@@ -181,31 +278,52 @@ async fn run() -> anyhow::Result<()> {
             SessionCommand::Rename { session_id, title } => Request::new("update_session")
                 .with_path("session_id", session_id)
                 .with_body(json!({"title":title})),
+            SessionCommand::Model {
+                session_id,
+                model_id,
+            } => Request::new("update_session")
+                .with_path("session_id", session_id)
+                .with_body(json!({"model_id":model_id})),
             SessionCommand::Send {
                 session_id,
                 message,
                 request_id,
-            } => Request::new("submit_run")
-                .with_path("session_id", session_id)
-                .with_body(
-                    json!({"request_id":request_id.unwrap_or_else(Uuid::new_v4),"message":commands::input(&message)?}),
-                ),
+                model_id,
+            } => {
+                let mut body = json!({"request_id":request_id.unwrap_or_else(Uuid::new_v4),"message":commands::input(&message)?});
+                if let Some(model_id) = model_id {
+                    body["model_id"] = json!(model_id);
+                }
+                Request::new("submit_run")
+                    .with_path("session_id", session_id)
+                    .with_body(body)
+            }
         },
         Command::Run { command } => match command {
-            RunCommand::List { session_id, status, page } => {
+            RunCommand::List {
+                session_id,
+                status,
+                page,
+            } => {
                 let mut request = page.apply(Request::new("list_runs"));
                 if let Some(id) = session_id {
                     request
                         .query_parameters
                         .insert("session_id".into(), json!(id));
                 }
-                if let Some(status)=status {request.query_parameters.insert("status".into(),json!(status));}
+                if let Some(status) = status {
+                    request
+                        .query_parameters
+                        .insert("status".into(), json!(status));
+                }
                 request
             }
             RunCommand::Show { run_id } => Request::new("get_run").with_path("run_id", run_id),
             RunCommand::Cancel { run_id } => Request::new("cancel_run").with_path("run_id", run_id),
             RunCommand::Watch { run_id, after_seq } => {
-                if !args.json { show_target(target.as_ref()); }
+                if !args.json {
+                    show_target(target.as_ref());
+                }
                 return watch(&client, run_id, after_seq, target, args.json).await;
             }
         },

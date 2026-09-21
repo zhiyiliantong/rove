@@ -198,15 +198,7 @@ impl Agent {
             }
             let id = run["run_id"].as_str().unwrap().to_owned();
             // Snapshot the actual device model at dequeue time, not submission time.
-            let model: Option<String> = tx
-                .query_row(
-                    "SELECT value FROM metadata WHERE key='model_config'",
-                    [],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(db_error)?;
-            let model = model.map(decode).transpose()?.unwrap_or(Value::Null);
+            let model = crate::models::selected(&tx, run["model_id"].as_str())?;
             if model.is_null() {
                 run["error"] = json!(ApiError::new(
                     422,
@@ -455,9 +447,80 @@ impl Agent {
         let tx = db.transaction().map_err(db_error)?;
         let (status, value) = match request.operation_id.as_str() {
             "create_session" => {
-                let id = Uuid::new_v4().to_string();
+                let id = body["session_id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+                if let Some(execution) = body.get("execution_target")
+                    && execution["device_id"] == json!(self.store.device_id)
+                {
+                    return Err(ApiError::invalid("Use a local session for this device"));
+                }
+                if let Some(original) = tx
+                    .query_row(
+                        "SELECT request FROM session_creations WHERE id=?1",
+                        [&id],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(db_error)?
+                {
+                    if original == "null" {
+                        return Err(ApiError::new(
+                            409,
+                            "session_deleted",
+                            "This session was deleted and cannot be recreated",
+                        ));
+                    }
+                    if decode(original)? != *body {
+                        return Err(ApiError::new(
+                            409,
+                            "session_conflict",
+                            "Session ID already used with different creation input",
+                        ));
+                    }
+                    return match record(&tx, "sessions", &id) {
+                        Ok(session) => Ok((200, Some(session))),
+                        Err(e) if e.status == 404 => Err(ApiError::new(
+                            409,
+                            "session_deleted",
+                            "This session was deleted and cannot be recreated",
+                        )),
+                        Err(e) => Err(e),
+                    };
+                }
+                if tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
+                        [&id],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .map_err(db_error)?
+                {
+                    return Err(ApiError::new(
+                        409,
+                        "session_conflict",
+                        "Session ID is already in use",
+                    ));
+                }
                 let now = rove_core::now();
-                let session = json!({"session_id":id,"device_id":self.store.device_id,"title":body.get("title").cloned().unwrap_or(json!("New session")),"created_at":now,"updated_at":now});
+                let mut session = json!({"session_id":id,"device_id":self.store.device_id,"title":body.get("title").cloned().unwrap_or(json!("New session")),"created_at":now,"updated_at":now,"archived_at":null});
+                session["title_source"] = json!(if body["auto_title"]
+                    .as_bool()
+                    .unwrap_or(body.get("title").is_none())
+                {
+                    "default"
+                } else {
+                    "manual"
+                });
+                if let Some(execution) = body.get("execution_target") {
+                    session["execution_target"] = execution.clone();
+                }
+                tx.execute(
+                    "INSERT INTO session_creations(id,request) VALUES(?1,?2)",
+                    params![id, body.to_string()],
+                )
+                .map_err(db_error)?;
                 tx.execute(
                     "INSERT INTO sessions(id,record) VALUES(?1,?2)",
                     params![id, session.to_string()],
@@ -468,7 +531,28 @@ impl Agent {
             "get_session" => (200, record(&tx, "sessions", id)?),
             "update_session" => {
                 let mut session = record(&tx, "sessions", id)?;
-                session["title"] = body["title"].clone();
+                require_unarchived(&session)?;
+                if let Some(title) = body.get("title") {
+                    let title = title.as_str().unwrap().trim();
+                    if title.is_empty() {
+                        return Err(ApiError::invalid("Session title cannot be blank"));
+                    }
+                    session["title"] = json!(title);
+                    session["title_source"] = json!("manual");
+                }
+                if let Some(model_id) = body.get("model_id") {
+                    if session["execution_target"].is_null()
+                        && !model_id.is_null()
+                        && crate::models::selected(&tx, model_id.as_str())?.is_null()
+                    {
+                        return Err(ApiError::new(
+                            404,
+                            "model_not_found",
+                            "Model configuration not found",
+                        ));
+                    }
+                    session["model_id"] = model_id.clone();
+                }
                 session["updated_at"] = json!(rove_core::now());
                 tx.execute(
                     "UPDATE sessions SET record=?2 WHERE id=?1",
@@ -477,12 +561,102 @@ impl Agent {
                 .map_err(db_error)?;
                 (200, session)
             }
-            "list_sessions" => (
-                200,
-                crate::page(request, all_records(&tx, "sessions")?, "session_id")?,
-            ),
+            "list_sessions" => {
+                let mut sessions = all_records(&tx, "sessions")?;
+                if request
+                    .query_parameters
+                    .get("order")
+                    .and_then(Value::as_str)
+                    == Some("desc")
+                {
+                    sessions.reverse();
+                }
+                if let Some(archived) = request
+                    .query_parameters
+                    .get("archived")
+                    .and_then(Value::as_bool)
+                {
+                    sessions.retain(|s| s["archived_at"].is_null() != archived);
+                }
+                (200, crate::page(request, sessions, "session_id")?)
+            }
+            "archive_session" | "restore_session" => {
+                let mut session = record(&tx, "sessions", id)?;
+                if request.operation_id == "archive_session" {
+                    if session["archived_at"].is_null() {
+                        session["archived_at"] = json!(rove_core::now());
+                    }
+                } else {
+                    session["archived_at"] = Value::Null;
+                }
+                tx.execute(
+                    "UPDATE sessions SET record=?2 WHERE id=?1",
+                    params![id, session.to_string()],
+                )
+                .map_err(db_error)?;
+                (204, Value::Null)
+            }
+            "delete_session" => {
+                let session = record(&tx, "sessions", id)?;
+                if session["archived_at"].is_null() {
+                    return Err(ApiError::new(
+                        409,
+                        "session_not_archived",
+                        "Archive the session before deleting it",
+                    ));
+                }
+                let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE session_id=?1 AND json_extract(record,'$.status') IN ('queued','running','cancelling'))",[id],|r|r.get(0)).map_err(db_error)?;
+                if active {
+                    return Err(ApiError::new(
+                        409,
+                        "session_has_active_runs",
+                        "Wait for active jobs or restore the session and cancel them",
+                    ));
+                }
+                let remote_active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM remote_submissions WHERE session_id=?1 AND run_id IS NULL) OR EXISTS(SELECT 1 FROM remote_runs WHERE session_id=?1 AND json_extract(record,'$.status') NOT IN ('succeeded','failed','cancelled','interrupted'))",[id],|r|r.get(0)).map_err(db_error)?;
+                if remote_active {
+                    return Err(ApiError::new(
+                        409,
+                        "session_has_active_runs",
+                        "Resolve pending submissions and refresh remote completion before deletion",
+                    ));
+                }
+                tx.execute("INSERT OR IGNORE INTO deleted_requests(request_id) SELECT request_id FROM remote_submissions WHERE session_id=?1",[id]).map_err(db_error)?;
+                tx.execute("INSERT OR IGNORE INTO deleted_requests(request_id) SELECT json_extract(record,'$.request_id') FROM remote_runs WHERE session_id=?1",[id]).map_err(db_error)?;
+                tx.execute("DELETE FROM remote_submissions WHERE session_id=?1", [id])
+                    .map_err(db_error)?;
+                tx.execute("DELETE FROM remote_runs WHERE session_id=?1", [id])
+                    .map_err(db_error)?;
+                // Keep only a deletion marker, not the original title/target.
+                tx.execute(
+                    "UPDATE session_creations SET request='null' WHERE id=?1",
+                    [id],
+                )
+                .map_err(db_error)?;
+                tx.execute("INSERT OR IGNORE INTO deleted_requests(request_id) SELECT request_id FROM runs WHERE session_id=?1",[id]).map_err(db_error)?;
+                for sql in [
+                    "DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE session_id=?1)",
+                    "DELETE FROM run_output WHERE run_id IN (SELECT id FROM runs WHERE session_id=?1)",
+                    "DELETE FROM rig_messages WHERE session_id=?1",
+                    "DELETE FROM messages WHERE session_id=?1",
+                    "DELETE FROM runs WHERE session_id=?1",
+                    "DELETE FROM sessions WHERE id=?1",
+                ] {
+                    tx.execute(sql, [id]).map_err(db_error)?;
+                }
+                (204, Value::Null)
+            }
             "list_runs" => {
                 let mut runs = all_records(&tx, "runs")?;
+                let mut stmt = tx
+                    .prepare("SELECT record FROM remote_runs")
+                    .map_err(db_error)?;
+                for value in stmt
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .map_err(db_error)?
+                {
+                    runs.push(decode(value.map_err(db_error)?)?);
+                }
                 runs.retain(|r| {
                     request
                         .query_parameters
@@ -527,7 +701,39 @@ impl Agent {
                         "Agent is stopping; retry after restart",
                     ));
                 }
-                let canonical = json!({"session_id":id,"network_id":body.get("network_id").cloned().unwrap_or(Value::Null),"message":body["message"]});
+                let mut canonical = json!({"session_id":id,"network_id":body.get("network_id").cloned().unwrap_or(Value::Null),"message":body["message"]});
+                // Preserve pre-catalog idempotency digests for requests without a selector.
+                if let Some(model_id) = body.get("model_id") {
+                    canonical["model_id"] = model_id.clone();
+                }
+                let deleted: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM deleted_requests WHERE request_id=?1)",
+                        [body["request_id"].as_str().unwrap()],
+                        |r| r.get(0),
+                    )
+                    .map_err(db_error)?;
+                if deleted {
+                    return Err(ApiError::new(
+                        409,
+                        "request_deleted",
+                        "This request belongs to deleted history and will not execute again",
+                    ));
+                }
+                if tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM remote_submissions WHERE request_id=?1) OR EXISTS(SELECT 1 FROM remote_runs WHERE json_extract(record,'$.request_id')=?1)",
+                        [body["request_id"].as_str()],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .map_err(db_error)?
+                {
+                    return Err(ApiError::new(
+                        409,
+                        "request_conflict",
+                        "request_id belongs to a linked remote submission",
+                    ));
+                }
                 let previous: Option<(String, String)> = tx
                     .query_row(
                         "SELECT record,request FROM runs WHERE request_id=?1",
@@ -546,16 +752,10 @@ impl Agent {
                     }
                     return Ok((200, Some(decode(run)?)));
                 }
-                record(&tx, "sessions", id)?;
-                let model: Option<String> = tx
-                    .query_row(
-                        "SELECT value FROM metadata WHERE key='model_config'",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(db_error)?;
-                if model.is_none_or(|v| v == "null") {
+                let session = record(&tx, "sessions", id)?;
+                require_unarchived(&session)?;
+                let selected_model = body.get("model_id").unwrap_or(&session["model_id"]);
+                if crate::models::selected(&tx, selected_model.as_str())?.is_null() {
                     return Err(ApiError::new(
                         422,
                         "model_not_configured",
@@ -578,6 +778,7 @@ impl Agent {
                 }
                 let run_id = Uuid::new_v4().to_string();
                 let mut run = json!({"run_id":run_id,"request_id":body["request_id"],"session_id":id,"device_id":self.store.device_id,"status":"queued","created_at":rove_core::now(),"started_at":null,"finished_at":null,"model":null,"last_seq":0,"error":null,"network_id":canonical["network_id"],"input_message":body["message"]});
+                run["model_id"] = selected_model.clone();
                 tx.execute("INSERT INTO runs(id,request_id,session_id,record,request) VALUES(?1,?2,?3,?4,?5)",params![run_id,body["request_id"].as_str().unwrap(),id,run.to_string(),canonical.to_string()]).map_err(db_error)?;
                 tx.execute(
                     "INSERT INTO run_output(run_id,tail,truncated) VALUES(?1,'',0)",
@@ -585,6 +786,7 @@ impl Agent {
                 )
                 .map_err(db_error)?;
                 event_tx(&tx, &mut run, "status", json!({"status":"queued"}))?;
+                title_from_message(&tx, id, body["message"].as_str().unwrap())?;
                 (202, run)
             }
             "cancel_run" => {
@@ -618,8 +820,47 @@ impl Agent {
             cancel.cancel();
         }
         self.runtime.wake.notify_one();
-        Ok((status, Some(value)))
+        Ok((status, if status == 204 { None } else { Some(value) }))
     }
+}
+pub(crate) fn require_unarchived(session: &Value) -> Result<(), ApiError> {
+    if !session["archived_at"].is_null() {
+        return Err(ApiError::new(
+            409,
+            "session_archived",
+            "Restore the session before modifying it",
+        ));
+    }
+    Ok(())
+}
+/// Runs inside the acceptance/cache transaction and re-reads current metadata,
+/// so a concurrent explicit rename always wins. Legacy titles stay untouched.
+pub(crate) fn title_from_message(db: &Connection, id: &str, message: &str) -> Result<(), ApiError> {
+    let mut session = record(db, "sessions", id)?;
+    if session["title_source"] != "default"
+        || !session["archived_at"].is_null()
+        || session["kind"] == "network_onboarding"
+    {
+        return Ok(());
+    }
+    let clean = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = clean.chars().filter(|c| !c.is_control());
+    let mut title: String = chars.by_ref().take(32).collect();
+    if title.is_empty() {
+        return Ok(());
+    }
+    if chars.next().is_some() {
+        title.push('…');
+    }
+    session["title"] = json!(title);
+    session["title_source"] = json!("message");
+    session["updated_at"] = json!(rove_core::now());
+    db.execute(
+        "UPDATE sessions SET record=?2 WHERE id=?1",
+        params![id, session.to_string()],
+    )
+    .map_err(db_error)?;
+    Ok(())
 }
 fn save_message_tx(db: &Connection, run: &Value, role: &str, parts: Value) -> Result<(), ApiError> {
     let message = json!({"message_id":Uuid::new_v4(),"session_id":run["session_id"],"run_id":run["run_id"],"role":role,"parts":parts,"created_at":rove_core::now()});

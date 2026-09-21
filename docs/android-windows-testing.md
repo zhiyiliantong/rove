@@ -2,6 +2,20 @@
 
 2026-09-10。以下是开发测试包，不是全平台正式发行版。
 
+## 2026-09-18 Android 原生布局与最新升级
+
+最新包/哈希/验收入口见 [Ubuntu / Android 交付](ubuntu-android-delivery.md)。本日已在既有 Android 14 arm64 覆盖升级，保留旧身份/两条会话/设置；真实界面提交、Rig unsupported、归档恢复通过，临时模型已移除。
+
+MainActivity 保留 edge-to-edge，由 AndroidX WindowInsetsCompat 在根容器处理 systemBars、displayCutout、ime 并消费，避免 WebView 的顶部与固定底栏遮挡及 CSS 重复留白；manifest 声明 adjustResize。竖屏、横屏、软键盘弹出/收起均有实际 WebView 尺寸证据，未将 Android 14 Redroid 的结果扩大到所有 API/物理相机/屏幕缺口设备。
+
+最终安全区域修复只涉及 Kotlin/manifest，复用已验证 JNI library 的 Gradle 重包；SHA-256 与包内 library 比对通过。不改变 native VPN、后台和本机命令尚未交付的边界。`scripts/android-webview-eval.mjs` 可增加一个不存在的结果文件路径参数，独占创建 JSON 证据（不会覆盖已有记录）。
+
+## 2026-09-17 Windows 原生回归
+
+Windows 11 测试机在新目录 `C:\Users\haobo\rove-check-20260917-2115` 运行本轮交叉编译的 `agent-tests.exe --test-threads=1`，21 项通过。包括真实 named pipe 的同账号双客户端、共享状态、首实例防抢占、退出后重新监听；增加专用线程临时匿名 impersonation 的拒绝测试，打开管道确实返回 Windows `ERROR_ACCESS_DENIED`，线程随后恢复身份。
+
+管道使用 protected DACL，只有当前用户 SID 一条 allow ACE，不继承 Everyone/其他用户权限。匿名身份测试不等于另建普通账号登录测试；结合 DACL 检查验证本机同账号边界。不改系统账号、PATH、防火墙、网络服务或其他应用。此次同时在 Windows 验证存储检查、SQLite v2/v4 升级保留身份和内容、服务生命周期、会话归档及队列逻辑。没有据此宣称 Windows overlay 或安装器已经交付。
+
 ## Windows x86_64
 
 构建前先在 `apps/rove-gui` 执行 `npm ci && npm run build`，然后在仓库根目录执行：
