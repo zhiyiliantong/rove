@@ -12,10 +12,17 @@ pub struct Store {
     pub(crate) connection: Mutex<Connection>,
     pub device_id: DeviceId,
     pub data_dir: PathBuf,
+    packaged_discovery_service_url: Option<String>,
     _lock: File,
 }
 impl Store {
     pub fn open(data_dir: &Path) -> anyhow::Result<Self> {
+        Self::open_with_packaged_discovery(data_dir, None)
+    }
+    pub(crate) fn open_with_packaged_discovery(
+        data_dir: &Path,
+        packaged_discovery_service_url: Option<String>,
+    ) -> anyhow::Result<Self> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::{DirBuilderExt, MetadataExt};
@@ -148,6 +155,7 @@ impl Store {
             connection: Mutex::new(db),
             device_id,
             data_dir,
+            packaged_discovery_service_url,
             _lock: lock,
         })
     }
@@ -167,9 +175,22 @@ impl Store {
         Ok(())
     }
     pub fn settings(&self) -> anyhow::Result<Value> {
-        Ok(self
-            .get("settings")?
-            .unwrap_or_else(|| json!({"max_active_runs":4,"config_server_url":null})))
+        let mut settings = self.get("settings")?.unwrap_or_else(|| json!({}));
+        let object = settings
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("stored settings are not an object"))?;
+        object.entry("max_active_runs").or_insert(json!(4));
+        object.entry("config_server_url").or_insert(Value::Null);
+        object.entry("discovery_service_url").or_insert_with(|| {
+            self.packaged_discovery_service_url
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        });
+        Ok(settings)
+    }
+    pub(crate) fn is_packaged_discovery_service_url(&self, value: &str) -> bool {
+        self.packaged_discovery_service_url.as_deref() == Some(value)
     }
     pub fn model_state(&self) -> anyhow::Result<Value> {
         Ok(match self.get("model_config")? {
@@ -202,6 +223,30 @@ mod tests {
         assert_eq!(store.settings().unwrap()["max_active_runs"], 4);
         drop(store);
         assert_eq!(Store::open(&path).unwrap().device_id, id);
+    }
+
+    #[test]
+    fn packaged_discovery_default_is_fallback_and_explicit_clear_wins() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("private");
+        let store =
+            Store::open_with_packaged_discovery(&path, Some("http://10.1.2.237:8090".to_owned()))
+                .unwrap();
+        assert_eq!(
+            store.settings().unwrap()["discovery_service_url"],
+            "http://10.1.2.237:8090"
+        );
+        store
+            .set(
+                "settings",
+                &json!({
+                    "max_active_runs": 4,
+                    "config_server_url": null,
+                    "discovery_service_url": null
+                }),
+            )
+            .unwrap();
+        assert!(store.settings().unwrap()["discovery_service_url"].is_null());
     }
 
     #[test]

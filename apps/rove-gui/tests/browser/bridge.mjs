@@ -1,6 +1,6 @@
 // IPC boundary fixture only: production code always uses the native SDK bridge.
 export async function bridge(page, options = {}) {
-  await page.addInitScript(({ live = false, empty = false, loseSubmit = false, os = 'linux', configured = true,linked=false,pendingRemote=false,offline=false,services=false,sync=false,intro=false,verified=true }) => {
+  await page.addInitScript(({ live = false, empty = false, loseSubmit = false, os = 'linux', configured = true,linked=false,pendingRemote=false,offline=false,services=false,sync=false,intro=false,verified=true,localDeviceId='local-device' }) => {
     if(!intro&&!localStorage.getItem('rove-gui-introduction-v1'))localStorage.setItem('rove-gui-introduction-v1',JSON.stringify({version:1,completed:true,step:3,reset_pending:false}));
     const sessions = empty ? [] : [{ session_id: 's1', title: '音乐部署', created_at:'2026-09-16T00:00:00Z' }, { session_id: 's2', title: '代码代理', created_at:'2026-09-15T00:00:00Z' }];
     const execution={network_id:'00000000-0000-4000-8000-000000000111',device_id:'00000000-0000-4000-8000-000000000222'};
@@ -10,12 +10,14 @@ export async function bridge(page, options = {}) {
     const snapshot = { run, snapshot_seq: 1, output_tail: '### 部署建议\n\n先检查空间。\n\n```sh\ndf -h\n```\n\n$$\nA = \\pi r^2\n$$', output_truncated: false };
     const calls = [], events = [], submitted = new Map();
     const catalog={connections:configured?[{connection_id:'c1',provider:'openai_compatible',base_url:'http://127.0.0.1:11434/v1',api_key_configured:true}]:[],models:configured?[{model_id:'m1',connection_id:'c1',model:'test-model',name:'日常助手',tested_at:verified?'2026-09-18T00:00:00Z':null}]:[],default_model_id:configured?'m1':null};
+    const settings={max_active_runs:4,config_server_url:null,discovery_service_url:null};
     const tested=new Set();
     const test_key=b=>JSON.stringify([b.provider,b.base_url,b.api_key,b.model]);
     window.testBridge = { sessions, calls, events, snapshot, loseSubmit, failEvents: false };
     window.__TAURI_INTERNALS__ = {
       invoke: async (command, args) => {
         if(command==='plugin:opener|open_url'){calls.push({command,...args});if(window.testBridge.failOpen)throw new Error('test browser unavailable');return;}
+        if(command==='network_config_qr'){calls.push({command,...args});if(window.testBridge.failQr)throw new Error('QR unavailable');return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0h1v1H0z"/></svg>';}
         if (command === 'agent_events') {
           calls.push({ command, ...args });
           await new Promise(resolve => setTimeout(resolve, 100));
@@ -28,12 +30,33 @@ export async function bridge(page, options = {}) {
         const op = request.operation_id;
         let body;
         switch (op) {
-          case 'get_device': body = { device_id: 'local-device', os }; break;
+          case 'list_device_aliases': body={items:JSON.parse(localStorage.getItem('fixture-device-aliases')||'[]')};break;
+          case 'set_device_alias': {
+            let items=JSON.parse(localStorage.getItem('fixture-device-aliases')||'[]');
+            const value=request.body;
+            if(value.alias&&items.some(a=>a.alias.toLowerCase()===value.alias.toLowerCase()&&!(a.network_id===value.network_id&&a.device_id===value.device_id)))return {status_code:409,body:{error:{code:'device_alias_conflict',message:'Already used'}}};
+            items=items.filter(a=>!(a.network_id===value.network_id&&a.device_id===value.device_id));
+            if(value.alias)items.push(value);
+            localStorage.setItem('fixture-device-aliases',JSON.stringify(items));body=value;break;
+          }
+          case 'get_device': body = { device_id: localDeviceId, os }; break;
           case 'test_network_peer': body={endpoint:request.body.endpoint,status:request.body.endpoint.startsWith('udp:')?'unsupported':'reachable',latency_ms:2,message:'TCP only'};break;
-          case 'create_network': window.testBridge.createdNetwork=request.body;body={network_id:'created-network',state:'stopped'};break;
-          case 'get_network_join_config': body={schema_version:1,network_id:'created-network',display_name:window.testBridge.createdNetwork.display_name,easytier:window.testBridge.createdNetwork.config};break;
+          case 'list_public_bootstrap_nodes': if(window.testBridge.publicError)return {status_code:409,body:{error:{code:window.testBridge.publicError,message:'Discovery fixture failure'}}};body={source:'https://directory.fixture/v1/nodes',upstream_source:'fixture',stale:false,items:[{id:'fixture:7',name:'Fixture public node',address:'udp://public.fixture:7178',protocol:'udp',uri_kind:'connector',health_status:'up',latency_ms:18,relay_claim:'allowed',metadata_verified:false}]};break;
+          case 'resolve_bootstrap_discovery':
+            if(!/^(https?|txt|srv):\/\//.test(request.body.url))return {status_code:422,body:{error:{code:'invalid_discovery_url',message:'Discovery URL required'}}};
+            body={source_url:request.body.url,resolved_url:'tcp://resolved.fixture:7196',protocol:'tcp',candidates:['tcp://resolved.fixture:7196'],chain:[request.body.url,'tcp://resolved.fixture:7196']};break;
+          case 'create_network': if(window.testBridge.failCreate)return {status_code:422,body:{error:{code:'fixture_create_failed',message:'fixture create failed'}}};window.testBridge.createdNetwork=request.body;body={network_id:'created-network',state:'stopped'};break;
+          case 'get_network': {
+            const id=request.path_parameters.network_id;
+            const known=sync?[{network_id:execution.network_id,display_name:'同步测试网络',state:'running'}]:services?[{network_id:'n1',display_name:'家庭网络',state:'stopped'},{network_id:'n2',display_name:'工作网络',state:'stopped'}]:[];
+            const network=known.find(n=>n.network_id===id);
+            if(!network)return {status_code:404,body:{error:{code:'network_not_found',message:'Network not found'}}};
+            body={...network,overlay_addresses:[],overlay_cidr:null,last_error:null};break;
+          }
+          case 'get_network_join_config': if(window.testBridge.failCard)return {status_code:503,body:{error:{code:'fixture_card_failed',message:'fixture card failed'}}};body=window.testBridge.createdNetwork?{schema_version:1,network_id:'created-network',display_name:window.testBridge.createdNetwork.display_name,easytier:window.testBridge.createdNetwork.config}:{schema_version:1,network_id:request.path_parameters.network_id,display_name:'家庭网络',easytier:{network_name:'home',network_secret:'fixture-secret',bootstrap_peers:['txt://seed.fixture'],dhcp:true}};break;
           case 'import_network': body={created:true,network:{network_id:'imported',state:'stopped'}};break;
-          case 'get_settings': body = { max_active_runs: 4, config_server_url: null }; break;
+          case 'get_settings': body=settings;break;
+          case 'update_settings': Object.assign(settings,request.body);body=settings;break;
           case 'get_model_config': body = { config: configured ? { provider: 'openai_compatible', base_url: 'http://127.0.0.1:11434/v1', model: 'test-model' } : null }; break;
           case 'get_model_catalog': body=sync&&request.target?{connections:[{connection_id:'remote-c',provider:'openai',base_url:'https://example.invalid',api_key_configured:true}],models:[{model_id:'remote-m',connection_id:'remote-c',model:'remote',name:'远端配置'}],default_model_id:'remote-m'}:catalog;break;
           case 'sync_model_connection': {
@@ -63,7 +86,7 @@ export async function bridge(page, options = {}) {
             const id=request.path_parameters.connection_id;catalog.connections=catalog.connections.filter(c=>c.connection_id!==id);catalog.models=catalog.models.filter(m=>m.connection_id!==id);if(!catalog.models.some(m=>m.model_id===catalog.default_model_id))catalog.default_model_id=null;body=catalog;break;
           }
           case 'list_session_submissions': body={items:request.path_parameters.session_id==='s1'?pending:[],next_cursor:null};break;
-          case 'list_networks': body={items:sync?[{network_id:execution.network_id,display_name:'同步测试网络',state:'running'}]:services?[{network_id:'n1',display_name:'家庭网络'},{network_id:'n2',display_name:'工作网络'}]:[],next_cursor:null};break;
+          case 'list_networks': body={items:sync?[{network_id:execution.network_id,display_name:'同步测试网络',state:'running',last_error:null}]:services?[{network_id:'n1',display_name:'家庭网络',state:'stopped',last_error:null},{network_id:'n2',display_name:'工作网络',state:'stopped',last_error:null}]:[],next_cursor:null};break;
           case 'list_services': body={items:services&&request.query_parameters.network_id==='n1'?[{service_id:'music',name:'音乐',network_id:'n1',state:'published',target_status:'reachable',endpoints:['http://10.20.30.4:8000','tcp://10.20.30.4:8001'],access_info:'fixture-password <script>alert(1)</script>',last_error:null}]:[],next_cursor:null};break;
           case 'list_network_devices': body={items:sync?[{...execution,display_name:'同步目标',os:'linux',arch:'x86_64',state:'online',capabilities:['system_exec'],overlay_addresses:[],last_error:null}]:[],next_cursor:null};break;
           case 'list_messages': body = { items: [], next_cursor: null }; break;
@@ -81,7 +104,7 @@ export async function bridge(page, options = {}) {
             }
             return {status_code:204};
           }
-          case 'create_session': body = { session_id: `s${sessions.length + 1}`, title: request.body.title, title_source:request.body.auto_title?'default':'manual', created_at:new Date().toISOString(), execution_target:request.body.execution_target }; sessions.push(body); break;
+          case 'create_session': if(window.testBridge.failSessionCreate)return {status_code:503,body:{error:{code:'session_create_failed',message:'Could not save conversation'}}};body = { session_id: `s${sessions.length + 1}`, title: request.body.title, title_source:request.body.auto_title?'default':'manual', created_at:new Date().toISOString(), execution_target:request.body.execution_target }; sessions.push(body); break;
           case 'list_runs': body = { items: request.query_parameters.session_id === 's1' && !empty && (!request.query_parameters.status||request.query_parameters.status===run.status) ? [run] : [], next_cursor: null,...(offline?{sync_error:{code:'target_unreachable',message:'offline'}}:{}) }; break;
           case 'get_run': body = {...snapshot,run:submitted.get(request.path_parameters.run_id)??snapshot.run,...(offline?{sync_error:{code:'target_unreachable',message:'offline'}}:{})}; break;
           case 'cancel_run': run.status = 'cancelled'; body = run; break;

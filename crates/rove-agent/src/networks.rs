@@ -82,7 +82,8 @@ impl Agent {
             serde_json::from_str(&config).map_err(|e| storage_error(e.into()))?,
         ))
     }
-    fn import_join(&self, config: Value) -> Result<Value, ApiError> {
+    fn import_join(&self, mut config: Value) -> Result<Value, ApiError> {
+        sharing::normalize_join(&mut config)?;
         sharing::validate_join(&config)?;
         let id = config["network_id"].as_str().unwrap();
         let mut db = self.store.connection.lock().unwrap();
@@ -137,17 +138,55 @@ impl Agent {
             .map(String::as_str)
             .unwrap_or("");
         let (status, value) = match request.operation_id.as_str() {
+            "list_public_bootstrap_nodes" => {
+                let settings = self.store.settings().map_err(crate::storage_error)?;
+                let directory_root = settings["discovery_service_url"]
+                    .as_str()
+                    .map(str::to_owned);
+                let allow_packaged_http = directory_root
+                    .as_deref()
+                    .is_some_and(|value| self.store.is_packaged_discovery_service_url(value));
+                (
+                    200,
+                    crate::bootstrap_discovery::list_public_nodes(
+                        directory_root,
+                        allow_packaged_http,
+                    )
+                    .await?,
+                )
+            }
+            "resolve_bootstrap_discovery" => (
+                200,
+                crate::bootstrap_discovery::resolve(
+                    body["url"].as_str().unwrap().to_owned(),
+                    body.get("network_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                )
+                .await?,
+            ),
             "test_network_peer" => (
                 200,
                 crate::network_probe::probe(body["endpoint"].as_str().unwrap()).await?,
             ),
             "create_network" => {
                 let network_id = Uuid::new_v4();
-                let mut cfg = body.get("config").cloned().unwrap_or_else(|| json!({"network_name":format!("rove-{network_id}"),"network_secret":format!("{}{}",Uuid::new_v4().simple(),Uuid::new_v4().simple()),"bootstrap_peers":body.get("bootstrap_peers").cloned().unwrap_or(json!([])),"dhcp":true}));
+                let display_name = body
+                    .get("display_name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        format!("net-{}", &Uuid::new_v4().simple().to_string()[..2])
+                    });
+                let mut cfg = body.get("config").cloned().unwrap_or_else(|| json!({"network_name":display_name,"network_secret":format!("{}{}",Uuid::new_v4().simple(),Uuid::new_v4().simple()),"bootstrap_peers":body.get("bootstrap_peers").cloned().unwrap_or(json!([])),"dhcp":true}));
                 if let Some(legacy) = body.get("ipv4_cidr") {
                     cfg["ipv4_cidr"] = legacy.clone();
                 }
-                let config = json!({"schema_version":1,"network_id":network_id,"display_name":body["display_name"],"easytier":cfg});
+                let mut config = json!({"schema_version":1,"network_id":network_id,"display_name":display_name,"easytier":cfg});
+                sharing::normalize_join(&mut config)?;
                 sharing::validate_join(&config)?;
                 validate_local_address(&config, body.get("local_ipv4"), false)?;
                 let result = self.import_join(config)?;
@@ -208,8 +247,12 @@ impl Agent {
                         "Stop the network before updating it",
                     ));
                 }
+                if body["easytier"]["network_secret"] != config["easytier"]["network_secret"] {
+                    return Err(ApiError::invalid("Network key cannot be changed"));
+                }
                 config["display_name"] = body["display_name"].clone();
                 config["easytier"] = body["easytier"].clone();
+                sharing::normalize_join(&mut config)?;
                 sharing::validate_join(&config)?;
                 let local = body.get("local_ipv4").cloned().unwrap_or_else(|| {
                     if config["easytier"]["dhcp"] == true {
@@ -258,7 +301,10 @@ impl Agent {
                 return Ok((204, None));
             }
             "stop_network" => {
-                #[cfg(all(feature = "easytier", target_os = "linux"))]
+                #[cfg(all(
+                    feature = "easytier",
+                    any(target_os = "linux", target_os = "android", windows)
+                ))]
                 if self.network_driver.get().is_some() {
                     let mut network = self.network(id)?.0;
                     if network["state"] == "stopped" && network["enabled"] == false {
@@ -268,6 +314,7 @@ impl Agent {
                     network["state"] = json!("stopping");
                     network["updated_at"] = json!(rove_core::now());
                     self.save_network_state(&network)?;
+                    self.network_driver.get().unwrap().reset_recovery(id);
                     return Ok((202, Some(network)));
                 }
                 let network = self.network(id)?.0;
@@ -285,7 +332,29 @@ impl Agent {
                 let (record, config) = self.network(id)?;
                 validate_local_address(&config, record.get("local_ipv4"), true)?;
                 self.check_network_join(id)?;
-                #[cfg(all(feature = "easytier", target_os = "linux"))]
+                #[cfg(all(windows, feature = "easytier-native"))]
+                if let Some(driver) = self.network_driver.get() {
+                    driver.client.prepare_native_runtime().await.map_err(|_| ApiError::new(
+                        503, "overlay_permission_required",
+                        "Windows network helper is unavailable; check the bundled runtime and approve system elevation using this Windows account"
+                    ))?;
+                }
+                #[cfg(all(target_os = "android", feature = "easytier"))]
+                if self
+                    .network_driver
+                    .get()
+                    .is_some_and(|driver| !driver.mobile.ready())
+                {
+                    return Err(ApiError::new(
+                        503,
+                        "overlay_permission_required",
+                        "Authorize the Android VPN from the local Rove application first",
+                    ));
+                }
+                #[cfg(all(
+                    feature = "easytier",
+                    any(target_os = "linux", target_os = "android", windows)
+                ))]
                 if self.network_driver.get().is_some() {
                     if self.runtime.stopping.is_cancelled() {
                         return Err(ApiError::new(503, "agent_stopping", "Agent is stopping"));
@@ -303,6 +372,7 @@ impl Agent {
                     network["last_error"] = Value::Null;
                     network["updated_at"] = json!(rove_core::now());
                     self.save_network_state(&network)?;
+                    self.network_driver.get().unwrap().reset_recovery(id);
                     return Ok((202, Some(network)));
                 }
                 return Err(ApiError::new(
@@ -325,12 +395,18 @@ impl Agent {
             }
             "list_network_devices" => {
                 self.network(id)?;
-                #[cfg(all(feature = "easytier", target_os = "linux"))]
+                #[cfg(all(
+                    feature = "easytier",
+                    any(target_os = "linux", target_os = "android", windows)
+                ))]
                 return Ok((
                     200,
                     Some(crate::page(request, self.network_peers(id), "device_id")?),
                 ));
-                #[cfg(not(all(feature = "easytier", target_os = "linux")))]
+                #[cfg(not(all(
+                    feature = "easytier",
+                    any(target_os = "linux", target_os = "android", windows)
+                )))]
                 (200, json!({"items":[],"next_cursor":null}))
             }
             _ => {
@@ -400,6 +476,45 @@ pub(crate) fn validate_local_address(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn network_edit_preserves_key_and_saves_name_and_bootstrap() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = Agent::open(&dir.path().join("agent")).unwrap();
+        let initial = json!({"network_name":"identity","network_secret":"original","bootstrap_peers":[],"dhcp":true});
+        let created = agent
+            .handle(
+                &Request::new("create_network")
+                    .with_body(json!({"display_name":"before","config":initial})),
+            )
+            .await;
+        assert_eq!(created.status_code, 201);
+        let record = created.body.unwrap();
+        let id = record["network_id"].as_str().unwrap();
+        let mut changed = initial.clone();
+        changed["network_secret"] = json!("replacement");
+        let request = |cfg: Value| {
+            Request::new("update_network")
+                .with_path("network_id", id)
+                .with_body(json!({"display_name":"after","easytier":cfg}))
+        };
+        let rejected = agent.handle(&request(changed)).await;
+        assert_eq!(rejected.status_code, 400);
+        assert_eq!(agent.network(id).unwrap().1["easytier"], initial);
+        changed = initial.clone();
+        changed["bootstrap_peers"] = json!(["txt://bootstrap.example.com"]);
+        let saved = agent.handle(&request(changed.clone())).await;
+        assert_eq!(saved.status_code, 200, "{saved:?}");
+        assert_eq!(saved.body.unwrap()["display_name"], "after");
+        assert_eq!(agent.network(id).unwrap().1["easytier"], changed);
+        drop(agent);
+        let reopened = Agent::open(&dir.path().join("agent")).unwrap();
+        assert_eq!(
+            reopened.network(id).unwrap().1["easytier"]["network_secret"],
+            "original"
+        );
+        assert_eq!(reopened.network(id).unwrap().0["display_name"], "after");
+    }
 
     #[tokio::test]
     async fn manual_addresses_stay_local_and_overlap_checks_include_containment() {
@@ -536,6 +651,34 @@ mod tests {
             "overlay_unavailable"
         );
         assert!(agent.network(&ids[0]).is_ok());
+        agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn omitted_name_is_generated_and_bootstrap_peers_are_deduplicated() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Agent::open(&directory.path().join("agent")).unwrap();
+        let response = agent
+            .handle(&Request::new("create_network").with_body(json!({
+                "bootstrap_peers":["tcp://node.example:11010","tcp://node.example:11010"]
+            })))
+            .await;
+        assert_eq!(response.status_code, 201, "{response:?}");
+        let record = response.body.unwrap();
+        let name = record["display_name"].as_str().unwrap();
+        assert!(name.starts_with("net-") && name.len() == 6);
+        assert_eq!(record["state"], "stopped");
+        let (_, join) = agent
+            .network(record["network_id"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(join["display_name"], join["easytier"]["network_name"]);
+        assert_eq!(
+            join["easytier"]["bootstrap_peers"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         agent.shutdown().await;
     }
 }

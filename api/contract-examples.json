@@ -1,6 +1,10 @@
 {
   "description": "契约结构示例；false 用例必须被 schema 拒绝。示例不是实际网络凭据。",
   "cases": [
+    {"api":"rove-agent.openapi.json","schema":"DeviceAlias","value":{"network_id":"00000000-0000-4000-8000-000000000111","device_id":"00000000-0000-4000-8000-000000000222","alias":"客厅小盒子"},"valid":true},
+    {"api":"rove-agent.openapi.json","schema":"DeviceAlias","value":{"network_id":"00000000-0000-4000-8000-000000000111","device_id":"00000000-0000-4000-8000-000000000222","alias":null},"valid":true},
+    {"api":"rove-agent.openapi.json","schema":"DeviceAlias","value":{"network_id":"00000000-0000-4000-8000-000000000111","device_id":"bad","alias":"客厅小盒子"},"valid":false},
+    {"api":"rove-agent.openapi.json","schema":"RoveApiInput","value":{"operation_id":"resolve_device_alias","body":{"alias":"客厅小盒子"}},"valid":true},
     {
       "api": "rove-agent.openapi.json",
       "schema": "ModelSyncRequest",
@@ -206,7 +210,8 @@
       "schema": "Settings",
       "value": {
         "max_active_runs": 4,
-        "config_server_url": "https://config.example.com"
+        "config_server_url": "https://config.example.com",
+        "discovery_service_url": "https://directory.example"
       },
       "valid": true
     },

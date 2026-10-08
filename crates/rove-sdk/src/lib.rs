@@ -173,6 +173,58 @@ impl RemoteClient {
         Ok(remote)
     }
 
+    /// Transport using verified native overlay facts. The platform adapter must
+    /// validate ownership and route isolation before constructing this client.
+    /// Windows additionally requires strong-host receive/send on its interfaces;
+    /// binding a local IP alone does not establish an ingress security boundary.
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
+    pub fn on_overlay(
+        base_url: reqwest::Url,
+        network_id: uuid::Uuid,
+        device_id: uuid::Uuid,
+        interface: &str,
+        source: std::net::Ipv4Addr,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            !interface.is_empty()
+                && !source.is_unspecified()
+                && !source.is_loopback()
+                && !source.is_multicast()
+                && !source.is_broadcast(),
+            "Missing native overlay interface or address"
+        );
+        // An overlay endpoint is an observed IP, never a DNS name that could
+        // change between discovery and connection.
+        anyhow::ensure!(
+            base_url
+                .host_str()
+                .is_some_and(|host| host.parse::<std::net::Ipv4Addr>().is_ok()),
+            "Expected a discovered overlay IPv4 endpoint"
+        );
+        let mut remote = Self::new(base_url, network_id, device_id)?;
+        let builder = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .local_address(std::net::IpAddr::V4(source))
+            .connect_timeout(Duration::from_secs(5));
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let builder = builder.interface(interface);
+        remote.client = builder.build()?;
+        Ok(remote)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
+    pub async fn discover_on_overlay(
+        base_url: reqwest::Url,
+        network_id: uuid::Uuid,
+        interface: &str,
+        source: std::net::Ipv4Addr,
+    ) -> anyhow::Result<Value> {
+        Self::on_overlay(base_url, network_id, uuid::Uuid::nil(), interface, source)?
+            .discovery_hello()
+            .await
+    }
+
     /// Discovery knows a route, not a stable device ID yet. Only hello is sent;
     /// callers check protocol compatibility before any device/business request.
     #[cfg(target_os = "linux")]
@@ -182,10 +234,15 @@ impl RemoteClient {
         interface: &str,
     ) -> anyhow::Result<Value> {
         let remote = Self::on_interface(base_url, network_id, uuid::Uuid::nil(), interface)?;
-        let response = remote
+        remote.discovery_hello().await
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
+    async fn discovery_hello(&self) -> anyhow::Result<Value> {
+        let response = self
             .client
-            .get(remote.base_url.join("/v1/hello")?)
-            .header("X-Rove-Network-Id", network_id.to_string())
+            .get(self.base_url.join("/v1/hello")?)
+            .header("X-Rove-Network-Id", self.network_id.to_string())
             .timeout(Duration::from_secs(2))
             .send()
             .await?
@@ -193,7 +250,7 @@ impl RemoteClient {
         let hello: Value = serde_json::from_slice(&limited_body(response, 64 * 1024).await?)?;
         AGENT.validate("Hello", &hello)?;
         anyhow::ensure!(
-            hello["network_id"] == network_id.to_string(),
+            hello["network_id"] == self.network_id.to_string(),
             "target_mismatch"
         );
         Ok(hello)

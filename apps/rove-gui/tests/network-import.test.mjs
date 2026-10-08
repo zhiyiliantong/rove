@@ -1,9 +1,11 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parse_config_file,CONFIG_FILE_LIMIT} from '../src/network-import.ts';
-test('network files populate URL or JSON without executing an import',()=>{
-  assert.deepEqual(parse_config_file('\uFEFF {"schema_version":1}\n'),{config:{schema_version:1}});
-  const url='https://example.invalid/c/test#key=test-only';
-  assert.deepEqual(parse_config_file(`  ${url}\n`),{url});
-  for(const invalid of ['javascript:alert(1)','file:///tmp/config','https://example.invalid/no-key','https://user:secret@example.invalid/#key=x','{invalid','[]','x'.repeat(CONFIG_FILE_LIMIT+1)])assert.throws(()=>parse_config_file(invalid));
+import {decode_network_config,encode_network_config,parse_config_file,CONFIG_FILE_LIMIT} from '../src/network-import.ts';
+test('network files round-trip a bounded base64url JoinConfig without accepting URLs or raw JSON',()=>{
+  const config={schema_version:1,display_name:'家庭网络',easytier:{network_secret:'test-only'}};
+  const encoded=encode_network_config(config);
+  assert.match(encoded,/^[-_A-Za-z0-9]+$/);
+  assert.deepEqual(decode_network_config(` \uFEFF${encoded}\n`),config);
+  assert.deepEqual(parse_config_file(encoded),{config});
+  for(const invalid of ['https://example.invalid/c/test#key=test-only','{"schema_version":1}','[]','%%%','A','x'.repeat(CONFIG_FILE_LIMIT*2+1)])assert.throws(()=>parse_config_file(invalid));
 });

@@ -44,6 +44,7 @@ const known_notices=new Map<string,string>();
 for(const catalog of [en,zh])for(const [key,value]of Object.entries(catalog.ui)){if(!value.includes('{'))known_notices.set(value,`ui.${key}`);}
 export function notice_text(value:string):string {
   if(value.includes('Local agent response timed out'))return t('chat.transport_timeout');
+  if(/^(?:Error: )?overlay_unavailable: EasyTier runtime observation unavailable; retrying automatically in \d+ seconds \(stage:/.test(value))return `overlay_unavailable: ${t('errors.overlay_recovering')}`;
   const key=known_notices.get(value);if(key)return t(key);
   const code=/^(?:Error: )?([a-z][a-z0-9_]+):/.exec(value)?.[1];
   return code&&i18n.global.te(`errors.${code}`)?`${code}: ${t(`errors.${code}`)}`:value;

@@ -11,6 +11,33 @@ use rove_protocol::{
 use serde_json::{Value, json};
 const AAD: &[u8] = b"rove.network_join_config.v1";
 
+pub(crate) fn normalize_join(value: &mut Value) -> Result<(), ApiError> {
+    let Some(peers) = value["easytier"]["bootstrap_peers"].as_array() else {
+        return Ok(());
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut normalized = Vec::new();
+    for peer in peers {
+        let endpoint = peer
+            .as_str()
+            .ok_or_else(|| ApiError::invalid("Invalid bootstrap peer"))?;
+        let endpoint = crate::bootstrap_discovery::normalize_bootstrap(endpoint)
+            .map_err(|_| {
+                ApiError::new(
+                    422,
+                    "invalid_network_config",
+                    "Unsupported bootstrap peer endpoint",
+                )
+            })?
+            .to_string();
+        if seen.insert(endpoint.clone()) {
+            normalized.push(Value::String(endpoint));
+        }
+    }
+    value["easytier"]["bootstrap_peers"] = Value::Array(normalized);
+    Ok(())
+}
+
 pub fn validate_join(value: &Value) -> Result<(), ApiError> {
     if value["schema_version"] != 1 {
         return Err(ApiError::new(
@@ -39,19 +66,21 @@ pub fn validate_join(value: &Value) -> Result<(), ApiError> {
             ));
         }
     }
+    let mut peers = std::collections::BTreeSet::new();
     for peer in cfg["bootstrap_peers"].as_array().unwrap() {
-        let peer = url::Url::parse(peer.as_str().unwrap())
-            .map_err(|_| ApiError::invalid("Invalid bootstrap peer"))?;
-        if !matches!(peer.scheme(), "tcp" | "udp" | "ws" | "wss" | "quic" | "wg")
-            || peer.host().is_none()
-            || !peer.username().is_empty()
-            || peer.password().is_some()
-            || peer.fragment().is_some()
-        {
+        let normalized = crate::bootstrap_discovery::normalize_bootstrap(peer.as_str().unwrap())
+            .map_err(|_| {
+                ApiError::new(
+                    422,
+                    "invalid_network_config",
+                    "Unsupported bootstrap peer endpoint",
+                )
+            })?;
+        if !peers.insert(normalized.to_string()) {
             return Err(ApiError::new(
                 422,
                 "invalid_network_config",
-                "Unsupported bootstrap peer endpoint",
+                "Duplicate bootstrap peer endpoint",
             ));
         }
     }

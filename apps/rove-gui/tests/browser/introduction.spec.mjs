@@ -1,5 +1,22 @@
 import {test,expect} from '@playwright/test';
 import {bridge} from './bridge.mjs';
+test('onboarding creation keeps the card visible until returning to the guide',async({page})=>{
+  await bridge(page,{intro:true});await page.goto('/');
+  await page.locator('.intro-progress').getByRole('button',{name:/连接设备/}).click();
+  await page.locator('.intro-actions').getByRole('button',{name:'创建网络',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'创建网络'}),form=dialog.locator('.network-form');
+  await expect(form.getByLabel('网络名称',{exact:true})).toHaveValue(/^net-[a-z0-9]{2}$/);
+  await form.getByRole('button',{name:'创建网络',exact:true}).click();
+  await expect(dialog.getByRole('heading',{name:'网络名片',exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'返回引导',exact:true}).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'让设备，彼此相连'})).toBeVisible();
+  const footer=page.locator('.intro-footer');
+  await expect(footer.getByRole('button',{name:'下一步',exact:true})).toBeVisible();
+  await expect(footer.getByText('随时可以稍后设置',{exact:true})).toHaveCount(0);
+  await footer.getByRole('button',{name:'下一步',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'想做什么，聊聊就好'})).toBeVisible();
+});
 for(const width of [320,360,390,844,1440])test(`shipping introduction fits ${width}px and list actions live in plus`,async({page},testInfo)=>{
   await page.setViewportSize({width,height:width===844?390:width===360?568:820});
   await bridge(page,{intro:true,os:width<900?'android':'linux'});await page.goto('/');

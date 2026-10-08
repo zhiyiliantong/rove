@@ -7,6 +7,10 @@ rust-version.workspace = true
 [features]
 default = []
 easytier = ["dep:easytier"]
+# Native app-owned instances need a real TUN and transport implementations;
+# the management-only RPC adapter intentionally does not require them.
+# The pinned upstream mobile NIC calls its magic-dns hooks unconditionally.
+easytier-native = ["easytier", "easytier/tun", "easytier/wireguard", "easytier/websocket", "easytier/quic", "easytier/faketcp", "easytier/magic-dns", "dep:windows"]
 
 [dependencies]
 rove-core.workspace = true
@@ -27,6 +31,7 @@ ipnet.workspace = true
 aes-gcm.workspace = true
 base64.workspace = true
 reqwest.workspace = true
+hickory-resolver = "=0.25.2"
 libc.workspace = true
 rig = { package = "rig-core", version = "=0.42.0", default-features = false, features = ["reqwest", "rustls"] }
 futures-util = "0.3"
@@ -39,4 +44,5 @@ rove-config-server = { path = "../../services/rove-config-server" }
 quircs = "=0.10.3"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows = { version = "=0.61.3", optional = true, features = ["Win32_Foundation", "Win32_NetworkManagement_WindowsFirewall", "Win32_System_Com"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_NetworkManagement_WindowsFilteringPlatform", "Win32_Networking_WinSock", "Win32_System_Rpc"] }

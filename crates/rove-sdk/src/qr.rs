@@ -20,9 +20,21 @@ impl ShareQr {
             matches!(parsed.scheme(), "http" | "https") && parsed.fragment().is_some(),
             "Expected a share URL including its fragment key"
         );
-        QrCode::encode_text(url, QrCodeEcc::Medium)
+        Self::from_text(url)
+    }
+    /// Encode a self-contained card without applying legacy share-URL rules.
+    pub fn from_text(text: &str) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            !text.is_empty() && text.len() <= 4096,
+            "QR payload is empty or too long"
+        );
+        QrCode::encode_text(text, QrCodeEcc::Medium)
             .map(Self)
-            .map_err(|_| anyhow::anyhow!("Share URL does not fit a QR code; use URL import"))
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Configuration does not fit a QR code; copy the configuration instead"
+                )
+            })
     }
     pub fn svg(&self) -> String {
         let size = self.0.size() + 8;
@@ -62,6 +74,36 @@ impl ShareQr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn base64_card_qr_decodes_to_exact_configuration() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../apps/rove-gui/tests/browser/network-qr.json"
+        ))
+        .unwrap();
+        let payload = fixture["payload"].as_str().unwrap();
+        // The old URL-only path rejects this exact GUI payload.
+        assert!(ShareQr::new(payload).is_err());
+        let qr = ShareQr::from_text(payload).unwrap();
+        let scale = 6;
+        let side = (qr.size() + 8) * scale;
+        let mut pixels = vec![255u8; side * side];
+        for y in 0..side {
+            for x in 0..side {
+                if qr.is_dark((x / scale) as i32 - 4, (y / scale) as i32 - 4) {
+                    pixels[y * side + x] = 0;
+                }
+            }
+        }
+        let mut decoder = quircs::Quirc::default();
+        let codes: Vec<_> = decoder.identify(side, side, &pixels).collect();
+        assert_eq!(codes.len(), 1);
+        assert_eq!(
+            codes[0].as_ref().unwrap().decode().unwrap().payload,
+            payload.as_bytes()
+        );
+        assert!(ShareQr::from_text("").is_err());
+        assert!(ShareQr::from_text(&"A".repeat(4097)).is_err());
+    }
     #[test]
     fn qr_decodes_to_exact_url_including_fragment_key() {
         let url = "https://config.example.com/c/00112233445566778899aabbccddeeff#key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

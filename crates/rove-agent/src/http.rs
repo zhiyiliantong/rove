@@ -30,7 +30,7 @@ struct Context {
 /// Serve a network adapter's assigned IPv4 on its TUN interface. The caller must
 /// cancel this instance BEFORE removing/reconfiguring that network interface.
 /// No portable or unprivileged fallback is allowed when interface binding fails.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub async fn serve_overlay(
     agent: Arc<Agent>,
     network_id: Uuid,
@@ -62,166 +62,11 @@ pub(crate) async fn serve_bound(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn bind_overlay(
-    interface: &str,
-    address: std::net::SocketAddrV4,
-) -> anyhow::Result<tokio::net::TcpListener> {
-    validate_overlay(interface, *address.ip())?;
-    let socket = tokio::net::TcpSocket::new_v4()?;
-    socket.bind_device(Some(interface.as_bytes()))?;
-    socket.bind(address.into())?;
-    Ok(socket.listen(128)?)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn validate_overlay(
-    interface: &str,
-    address: std::net::Ipv4Addr,
-) -> anyhow::Result<u32> {
-    anyhow::ensure!(
-        !interface.is_empty()
-            && interface.len() < libc::IFNAMSIZ
-            && interface
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
-            && interface != "."
-            && interface != "..",
-        "Invalid overlay interface"
-    );
-    anyhow::ensure!(
-        !address.is_unspecified()
-            && !address.is_loopback()
-            && !address.is_multicast()
-            && !address.is_broadcast(),
-        "Invalid overlay address"
-    );
-    let flags = std::fs::read_to_string(format!("/sys/class/net/{interface}/tun_flags"))?;
-    let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)?;
-    anyhow::ensure!(flags & 3 == 1, "Overlay listener requires a TUN interface");
-    anyhow::ensure!(
-        interface_has_address(interface, address)?,
-        "Address is not assigned to the overlay interface"
-    );
-    check_main_routes(
-        &std::fs::read_to_string("/proc/net/route")?,
-        interface,
-        address,
-    )?;
-    let name = std::ffi::CString::new(interface)?;
-    // SAFETY: name is a live NUL-terminated interface name.
-    let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
-    anyhow::ensure!(index != 0, "Overlay interface disappeared");
-    Ok(index)
-}
-
-#[cfg(target_os = "linux")]
-fn check_main_routes(
-    routes: &str,
-    interface: &str,
-    address: std::net::Ipv4Addr,
-) -> std::io::Result<()> {
-    check_subnet_routes(routes, interface, ipnet::Ipv4Net::new(address, 32).unwrap())
-}
-
+pub(crate) use crate::overlay_platform::bind_overlay;
+#[cfg(all(test, target_os = "linux"))]
+use crate::overlay_platform::{check_main_routes, check_subnet_routes, interface_has_address};
 #[cfg(feature = "easytier")]
-pub(crate) fn check_overlay_subnet(interface: &str, subnet: ipnet::Ipv4Net) -> std::io::Result<()> {
-    check_subnet_routes(
-        &std::fs::read_to_string("/proc/net/route")?,
-        interface,
-        subnet,
-    )
-}
-
-fn check_subnet_routes(
-    routes: &str,
-    interface: &str,
-    subnet: ipnet::Ipv4Net,
-) -> std::io::Result<()> {
-    for line in routes.lines().skip(1) {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        if fields.len() < 8 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid kernel route table",
-            ));
-        }
-        let parse = |value: &str| {
-            u32::from_str_radix(value, 16).map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Invalid kernel route field",
-                )
-            })
-        };
-        let destination = u32::from(std::net::Ipv4Addr::from(parse(fields[1])?.to_ne_bytes()));
-        let mask = u32::from(std::net::Ipv4Addr::from(parse(fields[7])?.to_ne_bytes()));
-        let flags = parse(fields[3])?;
-        // Default routes are expected for Internet access, not overlapping
-        // specific prefixes. Every non-overlay, non-loopback specific route
-        // overlapping our subnet is a conflict, including gateway routes.
-        if fields[0] != interface
-            && fields[0] != "lo"
-            && flags & 1 != 0
-            && mask != 0
-            && ((destination & mask == u32::from(subnet.network()) & mask)
-                || subnet.contains(&std::net::Ipv4Addr::from(destination & mask)))
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AddrInUse,
-                "Overlay address overlaps another interface route",
-            ));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn interface_has_address(interface: &str, address: std::net::Ipv4Addr) -> std::io::Result<bool> {
-    use std::{ffi::CStr, ptr};
-    let mut head = ptr::null_mut();
-    // SAFETY: getifaddrs initializes the pointer; it is freed once after traversal.
-    if unsafe { libc::getifaddrs(&mut head) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    struct Addresses(*mut libc::ifaddrs);
-    impl Drop for Addresses {
-        fn drop(&mut self) {
-            // SAFETY: this is the unmodified list returned by getifaddrs.
-            unsafe { libc::freeifaddrs(self.0) };
-        }
-    }
-    let addresses = Addresses(head);
-    let mut current = addresses.0;
-    let mut found = false;
-    while !current.is_null() {
-        // SAFETY: the linked list and sockaddr pointers remain alive until drop.
-        let item = unsafe { &*current };
-        if !item.ifa_name.is_null()
-            && !item.ifa_addr.is_null()
-            && unsafe { (*item.ifa_addr).sa_family } as i32 == libc::AF_INET
-        {
-            let ip = unsafe { &*item.ifa_addr.cast::<libc::sockaddr_in>() };
-            let assigned = std::net::Ipv4Addr::from(ip.sin_addr.s_addr.to_ne_bytes());
-            if unsafe { CStr::from_ptr(item.ifa_name) }.to_bytes() == interface.as_bytes() {
-                found |= assigned == address;
-            } else if item.ifa_flags & libc::IFF_LOOPBACK as u32 == 0 && !item.ifa_netmask.is_null()
-            {
-                // SAFETY: IPv4 getifaddrs entries supply an IPv4 netmask.
-                let mask = unsafe { &*item.ifa_netmask.cast::<libc::sockaddr_in>() };
-                let mask = u32::from_be(mask.sin_addr.s_addr);
-                if (u32::from(assigned) & mask) == (u32::from(address) & mask) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::AddrInUse,
-                        "Overlay address overlaps another interface subnet",
-                    ));
-                }
-            }
-        }
-        current = item.ifa_next;
-    }
-    Ok(found)
-}
+pub(crate) use crate::overlay_platform::{check_overlay_subnet, validate_overlay};
 
 fn router(context: Context) -> Router {
     let mut router = Router::new();
@@ -337,6 +182,13 @@ async fn execute(
         .iter()
         .find(|(_, operation)| operation.path == path && operation.method == method.as_str())
         .ok_or_else(|| ApiError::new(404, "operation_not_found", "Unknown endpoint"))?;
+    if crate::device_aliases::is_local_operation(operation_id) {
+        return Err(ApiError::new(
+            403,
+            "local_only",
+            "Device aliases are private to this device",
+        ));
+    }
     identity(&headers, "x-rove-network-id", context.network_id, true)?;
     identity(
         &headers,
@@ -501,6 +353,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn main_routes_reject_specific_physical_overlap_but_allow_default_and_own_tun() {
         let encode = |ip: std::net::Ipv4Addr| format!("{:08X}", u32::from_ne_bytes(ip.octets()));
         let ip = std::net::Ipv4Addr::new(10, 126, 126, 7);
@@ -869,6 +722,10 @@ mod tests {
                 }
             }
             request.body = match id.as_str() {
+                "set_device_alias" => {
+                    Some(json!({"network_id":missing,"device_id":missing,"alias":"wire-alias"}))
+                }
+                "resolve_device_alias" => Some(json!({"alias":"wire-alias"})),
                 "update_settings" => Some(json!({"max_active_runs":2})),
                 "set_model_config" => Some(
                     json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","model":"test","api_key":null}),
@@ -893,6 +750,7 @@ mod tests {
                     json!({"provider":"openai_compatible","base_url":"http://127.0.0.1:1/v1","api_key":null}),
                 ),
                 "test_network_peer" => Some(json!({"endpoint":"udp://127.0.0.1:11010"})),
+                "resolve_bootstrap_discovery" => Some(json!({"url":"txt://nonexistent.invalid"})),
                 "import_network" => Some(json!({"source":"manual","config":join})),
                 "update_network" => {
                     Some(json!({"display_name":"wire test","easytier":join["easytier"]}))
@@ -930,18 +788,23 @@ mod tests {
                     .unwrap_or_else(|error| panic!("HTTP {id}: {error}"));
                 AGENT.response(id, &first).unwrap();
                 AGENT.response(id, &second).unwrap();
-                assert_eq!(first.status_code, second.status_code, "{id}");
-                if first.status_code >= 400 {
+                if crate::device_aliases::is_local_operation(id) {
+                    assert_eq!(second.status_code, 403, "{id} must stay private");
+                    assert_eq!(second.body.unwrap()["error"]["code"], "local_only");
+                } else if first.status_code >= 400 {
+                    assert_eq!(first.status_code, second.status_code, "{id}");
                     assert_eq!(
                         first.body.unwrap()["error"]["code"],
                         second.body.unwrap()["error"]["code"],
                         "{id}"
                     );
+                } else {
+                    assert_eq!(first.status_code, second.status_code, "{id}");
                 }
             }
             covered.insert(id.clone());
         }
-        assert_eq!(covered.len(), 49);
+        assert_eq!(covered.len(), 54);
         // Expected errors deliberately exercise nonexistent resources without
         // external effects; happy-path SSE/sharing/service tests are separate.
         context.stopping.cancel();
@@ -956,7 +819,10 @@ mod tests {
         assert!(bind_overlay("lo", "10.1.2.3:0".parse().unwrap()).is_err());
         assert!(bind_overlay("../../lo", "10.1.2.3:0".parse().unwrap()).is_err());
         assert!(bind_overlay("missing-rove", "0.0.0.0:0".parse().unwrap()).is_err());
-        assert!(interface_has_address("lo", std::net::Ipv4Addr::LOCALHOST).unwrap());
-        assert!(!interface_has_address("lo", "10.1.2.3".parse().unwrap()).unwrap_or(false));
+        #[cfg(target_os = "linux")]
+        {
+            assert!(interface_has_address("lo", std::net::Ipv4Addr::LOCALHOST).unwrap());
+            assert!(!interface_has_address("lo", "10.1.2.3".parse().unwrap()).unwrap_or(false));
+        }
     }
 }

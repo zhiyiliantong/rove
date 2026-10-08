@@ -10,6 +10,20 @@ pub struct EmbeddedAgent {
 impl EmbeddedAgent {
     pub async fn start(directory: &Path) -> anyhow::Result<Self> {
         let agent = crate::Agent::open(directory)?;
+        Self::serve_agent(agent).await
+    }
+
+    #[cfg(all(target_os = "android", feature = "easytier-native"))]
+    pub async fn start_with_vpn(
+        directory: &Path,
+        host: std::sync::Arc<dyn crate::overlay::mobile_vpn::NativeVpnHost>,
+    ) -> anyhow::Result<Self> {
+        let agent = crate::Agent::open(directory)?;
+        agent.configure_android_easytier(host).await?;
+        Self::serve_agent(agent).await
+    }
+
+    async fn serve_agent(agent: std::sync::Arc<crate::Agent>) -> anyhow::Result<Self> {
         let socket = rove_sdk::socket_path(&agent.store.data_dir);
         let stopping = CancellationToken::new();
         let task = tokio::spawn(crate::serve(agent, stopping.clone()));

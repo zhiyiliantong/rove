@@ -41,6 +41,7 @@ test('network-scoped sync rejects discovery rows belonging to another network',a
   await page.evaluate(()=>{const invoke=window.__TAURI_INTERNALS__.invoke;window.__TAURI_INTERNALS__.invoke=async(cmd,args)=>{
     const result=await invoke(cmd,args);if(args?.request?.operation_id==='list_network_devices')result.body.items[0].network_id='different-network';return result;
   };});
+  await page.getByRole('button',{name:'同步测试网络',exact:true}).click();
   await page.getByRole('button',{name:'同步本机 API 配置',exact:true}).click();
   const dialog=page.getByRole('dialog');await expect(dialog.getByRole('alert')).toBeVisible();
   await expect(dialog.getByRole('button',{name:'选择设备',exact:true})).toHaveCount(0);

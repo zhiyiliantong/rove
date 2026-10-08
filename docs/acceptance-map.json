@@ -42,7 +42,9 @@
         "start_network",
         "stop_network",
         "get_network_join_config",
-        "test_network_peer"
+        "test_network_peer",
+        "list_public_bootstrap_nodes",
+        "resolve_bootstrap_discovery"
       ],
       "evidence": [
         "crates/rove-agent/tests/local_runtime.rs",
@@ -91,12 +93,17 @@
         "agent-communication"
       ],
       "operations": [
-        "list_network_devices"
+        "list_network_devices",
+        "list_device_aliases",
+        "set_device_alias",
+        "resolve_device_alias"
       ],
       "evidence": [
         "crates/rove-sdk/tests/remote.rs",
         "apps/rove-cli/tests/cli.rs",
-        "docs/two-host-acceptance.md"
+        "docs/two-host-acceptance.md",
+        "crates/rove-agent/src/device_aliases.rs",
+        "openspec/changes/local-session-ownership/verification.md"
       ],
       "status": "partial",
       "remaining": "Windows/macOS 原生网络及移动 native VPN；Linux 真实发现与远端调用已验证"

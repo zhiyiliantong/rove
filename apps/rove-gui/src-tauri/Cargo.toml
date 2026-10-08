@@ -20,6 +20,9 @@ uuid.workspace = true
 tauri = { version = "=2.11.5", features = [] }
 tauri-plugin-opener = "=2.5.5"
 
+[target.'cfg(windows)'.dependencies]
+tokio.workspace = true
+
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }
 
@@ -29,6 +32,8 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
+rove-agent = { workspace = true, features = ["easytier-native"] }
+anyhow.workspace = true
 # reqwest 0.13 uses this verifier; Tauri's older verifier is a separate instance.
 rustls-platform-verifier = "=0.7.0"
 jni = "=0.22.4"

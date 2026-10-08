@@ -42,3 +42,8 @@ strip = true
 [profile.dev]
 debug = 0
 incremental = false
+
+[patch.crates-io]
+# Keep native interface enumeration independent of the non-redistributable
+# Npcap DLL. Other platforms retain the upstream pnet implementation.
+pnet_datalink = { path = "vendor/pnet_datalink" }

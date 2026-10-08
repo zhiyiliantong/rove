@@ -6,7 +6,16 @@ use tokio_util::sync::CancellationToken;
 struct Args {
     #[arg(long, env = "ROVE_DATA_DIR")]
     data_dir: Option<PathBuf>,
-    /// Dedicated local EasyTier management portal (requires Linux + easytier feature).
+    /// Connect to an already authorized, bundled network helper (local only).
+    #[arg(
+        long,
+        requires = "network_helper_pid",
+        conflicts_with = "easytier_portal"
+    )]
+    network_helper_pipe: Option<PathBuf>,
+    #[arg(long, requires = "network_helper_pipe")]
+    network_helper_pid: Option<u32>,
+    /// Dedicated local EasyTier management portal (requires Linux/Windows + easytier feature).
     #[arg(long, env = "ROVE_EASYTIER_PORTAL")]
     easytier_portal: Option<std::net::SocketAddr>,
     #[arg(long, default_value = "easytier-core")]
@@ -20,8 +29,30 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let agent = rove_agent::Agent::open(&args.data_dir.unwrap_or_else(rove_sdk::default_data_dir))?;
+    #[cfg(all(windows, feature = "easytier-native"))]
+    if args.easytier_portal.is_none() {
+        if let Some(pipe) = args.network_helper_pipe.as_ref() {
+            agent
+                .configure_windows_easytier_pipe(
+                    pipe,
+                    args.network_helper_pid.unwrap(),
+                    args.easytier_listen.clone(),
+                    args.overlay_port,
+                )
+                .await?;
+        } else {
+            agent
+                .configure_windows_easytier(args.easytier_listen.clone(), args.overlay_port)
+                .await?;
+        }
+    }
+    #[cfg(not(all(windows, feature = "easytier-native")))]
+    anyhow::ensure!(
+        args.network_helper_pipe.is_none(),
+        "A bundled helper requires Windows with easytier-native"
+    );
     if let Some(portal) = args.easytier_portal {
-        #[cfg(all(feature = "easytier", target_os = "linux"))]
+        #[cfg(all(feature = "easytier", any(target_os = "linux", windows)))]
         agent
             .configure_easytier(
                 portal,
@@ -30,11 +61,11 @@ async fn main() -> anyhow::Result<()> {
                 args.overlay_port,
             )
             .await?;
-        #[cfg(not(all(feature = "easytier", target_os = "linux")))]
+        #[cfg(not(all(feature = "easytier", any(target_os = "linux", windows))))]
         {
             let _ = portal;
             anyhow::bail!(
-                "EasyTier network runtime requires a Linux build with --features easytier"
+                "EasyTier network runtime requires a Linux/Windows build with --features easytier"
             );
         }
     }

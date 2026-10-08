@@ -44,11 +44,17 @@ impl Agent {
             return rove_sdk::RemoteClient::new(url, target.network_id, target.device_id)
                 .map_err(|_| unavailable());
         }
-        #[cfg(all(feature = "easytier", target_os = "linux"))]
+        #[cfg(all(
+            feature = "easytier",
+            any(target_os = "linux", target_os = "android", windows)
+        ))]
         {
             self.target_client(target).await
         }
-        #[cfg(not(all(feature = "easytier", target_os = "linux")))]
+        #[cfg(not(all(
+            feature = "easytier",
+            any(target_os = "linux", target_os = "android", windows)
+        )))]
         {
             let _ = target;
             Err(unavailable())

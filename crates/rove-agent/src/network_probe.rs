@@ -4,18 +4,26 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
-pub(crate) async fn probe(endpoint: &str) -> Result<Value, ApiError> {
+pub(crate) fn normalize_connector(endpoint: &str) -> Result<url::Url, ApiError> {
     let url =
         url::Url::parse(endpoint).map_err(|_| ApiError::invalid("Invalid bootstrap endpoint"))?;
     if url.host().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
-        || url.query().is_some()
-        || !matches!(url.scheme(), "tcp" | "udp" | "ws" | "wss" | "quic" | "wg")
+        || !matches!(
+            url.scheme(),
+            "tcp" | "udp" | "ws" | "wss" | "quic" | "wg" | "faketcp"
+        )
+        || url.port_or_known_default().is_none_or(|port| port == 0)
     {
         return Err(ApiError::invalid("Invalid bootstrap endpoint"));
     }
+    Ok(url)
+}
+
+pub(crate) async fn probe(endpoint: &str) -> Result<Value, ApiError> {
+    let url = normalize_connector(endpoint)?;
     let result = |status: &str, latency: Option<u64>, message: &str| {
         json!({
             "endpoint": endpoint, "status": status, "latency_ms": latency, "message": message
@@ -85,6 +93,37 @@ mod tests {
             "tcp://127.0.0.1:80#secret",
         ] {
             assert!(probe(invalid).await.is_err());
+        }
+    }
+
+    #[test]
+    fn connector_validation_is_shared_and_rejects_discovery_or_credentials() {
+        assert_eq!(
+            normalize_connector("tcp://example.com:11010")
+                .unwrap()
+                .to_string(),
+            "tcp://example.com:11010"
+        );
+        assert_eq!(
+            normalize_connector("wss://example.com/relay")
+                .unwrap()
+                .scheme(),
+            "wss"
+        );
+        assert_eq!(
+            normalize_connector("faketcp://example.com:11010")
+                .unwrap()
+                .scheme(),
+            "faketcp"
+        );
+        for invalid in [
+            "txt://seed.example",
+            "tcp://example.com",
+            "tcp://user@example.com:11010",
+            "tcp://example.com:0",
+            "file:///tmp/node",
+        ] {
+            assert!(normalize_connector(invalid).is_err(), "{invalid}");
         }
     }
 }

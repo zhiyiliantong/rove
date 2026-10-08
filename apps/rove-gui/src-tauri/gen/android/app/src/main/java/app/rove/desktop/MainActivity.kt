@@ -5,13 +5,23 @@ import android.view.View
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.app.Activity
 
 class MainActivity : TauriActivity() {
   private external fun initializeTls(context: android.content.Context)
+  private external fun initializeVpn(controller: RoveVpnController)
+  private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    RoveVpnController.permissionResult(it.resultCode == Activity.RESULT_OK)
+  }
+  fun requestRoveVpn(intent: Intent) { vpnConsent.launch(intent) }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     System.loadLibrary("rove_gui")
     initializeTls(applicationContext)
+    RoveVpnController.attach(this)
+    initializeVpn(RoveVpnController)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     // Keep the entire WebView viewport within usable bounds. CSS env() alone

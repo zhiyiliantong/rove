@@ -57,6 +57,36 @@
     }
   ],
   "paths": {
+    "/v1/local/device-aliases": {
+      "get": {
+        "operationId": "list_device_aliases",
+        "summary": "仅本机读取设备别名；不通过 overlay 提供",
+        "responses": {
+          "200": {"description": "本机别名", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceAliasList"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "put": {
+        "operationId": "set_device_alias",
+        "summary": "仅本机保存别名；null 清除；本机名称唯一",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceAlias"}}}},
+        "responses": {
+          "200": {"description": "保存后的别名", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceAlias"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/local/device-aliases/resolve": {
+      "post": {
+        "operationId": "resolve_device_alias",
+        "summary": "仅本机按别名解析当前在线成员；离线不回退",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["alias"], "properties": {"alias": {"type": "string", "minLength": 1, "maxLength": 64}}}}}},
+        "responses": {
+          "200": {"description": "稳定身份与当前地址", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["alias", "target", "overlay_addresses", "is_local"], "properties": {"alias": {"type": "string"}, "target": {"$ref": "#/components/schemas/SocketTarget"}, "overlay_addresses": {"type": "array", "items": {"type": "string"}}, "is_local": {"type": "boolean"}}}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
     "/v1/network-probes": {
       "post": {
         "operationId": "test_network_peer",
@@ -66,6 +96,31 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NetworkPeerProbe"}}}},
         "responses": {
           "200": {"description": "探测结果；TCP 可达不表示 EasyTier 认证成功", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NetworkPeerProbeResult"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/networks/bootstrap-nodes": {
+      "get": {
+        "operationId": "list_public_bootstrap_nodes",
+        "summary": "从已配置的发现服务获取公共初始节点",
+        "tags": ["networks"],
+        "parameters": [{"$ref": "#/components/parameters/ContextNetwork"}, {"$ref": "#/components/parameters/TargetDevice"}],
+        "responses": {
+          "200": {"description": "已过滤、规范化且去重的公共节点；在线状态不表示已经入网", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BootstrapNodePage"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/networks/bootstrap-nodes/resolve": {
+      "post": {
+        "operationId": "resolve_bootstrap_discovery",
+        "summary": "预览解析 EasyTier HTTP(S)/TXT/SRV 发现地址",
+        "tags": ["networks"],
+        "parameters": [{"$ref": "#/components/parameters/ContextNetwork"}, {"$ref": "#/components/parameters/TargetDevice"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BootstrapDiscoveryRequest"}}}},
+        "responses": {
+          "200": {"description": "解析到最终连接 URL；不表示节点可达或已经入网", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BootstrapDiscoveryResult"}}}},
           "default": {"$ref": "#/components/responses/Error"}
         }
       }
@@ -530,7 +585,7 @@
         "tags": [
           "networks"
         ],
-        "description": "仅允许 stopped 或已清理资源的 failed 状态。保留 network_id 与 instance_id。运行中返回 409 network_must_be_stopped。",
+        "description": "仅允许 stopped 状态。保留 network_id 与 instance_id；网络密钥 network_secret 不可变，替换密钥返回 400 invalid_request。运行中返回 409 network_must_be_stopped。",
         "parameters": [
           {
             "$ref": "#/components/parameters/ContextNetwork"
@@ -2415,7 +2470,8 @@
         "additionalProperties": false,
         "required": [
           "max_active_runs",
-          "config_server_url"
+          "config_server_url",
+          "discovery_service_url"
         ],
         "properties": {
           "max_active_runs": {
@@ -2434,12 +2490,19 @@
                 "type": "null"
               }
             ]
+          },
+          "discovery_service_url": {
+            "anyOf": [
+              {"type": "string", "description": "公共节点发现服务 HTTPS 根地址；开发可用 loopback HTTP", "format": "uri"},
+              {"type": "null"}
+            ]
           }
         },
         "examples": [
           {
             "max_active_runs": 4,
-            "config_server_url": "https://config.example.com"
+            "config_server_url": "https://config.example.com",
+            "discovery_service_url": "https://directory.example"
           }
         ]
       },
@@ -2461,6 +2524,12 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "discovery_service_url": {
+            "anyOf": [
+              {"type": "string", "format": "uri"},
+              {"type": "null"}
             ]
           }
         },
@@ -2755,12 +2824,59 @@
           }
         }
       },
+      "BootstrapNode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "address", "protocol", "uri_kind", "health_status", "relay_claim", "metadata_verified"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "address": {"type": "string", "format": "uri"},
+          "protocol": {"type": "string", "enum": ["tcp", "udp", "ws", "wss", "quic", "wg", "faketcp", "http", "https", "txt", "srv"]},
+          "uri_kind": {"type": "string", "enum": ["connector", "discovery"]},
+          "health_status": {"type": "string", "enum": ["up", "down", "unknown"]},
+          "latency_ms": {"type": ["number", "null"], "minimum": 0},
+          "monitored_at": {"type": ["string", "null"]},
+          "uptime_24h": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "relay_claim": {"type": "string", "enum": ["allowed", "denied", "unknown"]},
+          "metadata_verified": {"type": "boolean"}
+        }
+      },
+      "BootstrapNodePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "source", "upstream_source", "stale"],
+        "properties": {
+          "items": {"type": "array", "maxItems": 200, "items": {"$ref": "#/components/schemas/BootstrapNode"}},
+          "source": {"type": "string", "format": "uri"},
+          "upstream_source": {"type": "string"},
+          "stale": {"type": "boolean"}
+        }
+      },
+      "BootstrapDiscoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url"],
+        "properties": {
+          "url": {"type": "string", "format": "uri", "pattern": "^(https?|txt|srv)://"},
+          "network_name": {"type": "string", "maxLength": 128}
+        }
+      },
+      "BootstrapDiscoveryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_url", "resolved_url", "protocol", "candidates", "chain"],
+        "properties": {
+          "source_url": {"type": "string", "format": "uri"},
+          "resolved_url": {"type": "string", "format": "uri"},
+          "protocol": {"type": "string", "enum": ["tcp", "udp", "ws", "wss", "quic", "wg", "faketcp"]},
+          "candidates": {"type": "array", "maxItems": 64, "items": {"type": "string", "format": "uri"}},
+          "chain": {"type": "array", "minItems": 2, "maxItems": 17, "items": {"type": "string", "format": "uri"}}
+        }
+      },
       "NetworkCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "display_name"
-        ],
         "properties": {
           "local_ipv4": {"type": ["string", "null"], "description": "手动模式本机地址，必须是 config.ipv4_cidr 内可用主机地址"},
           "display_name": {
@@ -4690,6 +4806,20 @@
           }
         }
       },
+      "DeviceAlias": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["network_id", "device_id", "alias"],
+        "properties": {
+          "network_id": {"type": "string", "format": "uuid"},
+          "device_id": {"type": "string", "format": "uuid"},
+          "alias": {"type": ["string", "null"], "minLength": 1, "maxLength": 64}
+        }
+      },
+      "DeviceAliasList": {
+        "type": "object", "additionalProperties": false, "required": ["items"],
+        "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/DeviceAlias"}}}
+      },
       "RoveApiInput": {
         "type": "object",
         "additionalProperties": false,
@@ -4700,6 +4830,8 @@
           "operation_id": {
             "type": "string",
             "enum": [
+              "list_device_aliases",
+              "resolve_device_alias",
               "get_device",
               "get_storage_usage",
               "get_settings",
@@ -4711,8 +4843,17 @@
               "get_service",
               "publish_service",
               "update_service",
-              "unpublish_service"
+              "unpublish_service",
+              "create_session",
+              "get_session",
+              "submit_run",
+              "list_runs",
+              "get_run",
+              "cancel_run"
             ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/SocketTarget"
           },
           "path_parameters": {
             "type": "object",
@@ -4729,7 +4870,7 @@
             "additionalProperties": {}
           }
         },
-        "description": "调用本机 Rove API，参数再按指定 operationId 验证。不转发远端、不接受任意 HTTP URL。"
+        "description": "调用本机或明确 target 指定的远端 Rove agent，参数再按 operationId 验证。会话/作业操作仅允许远端目标；create_session 必须指定稳定 session_id 且不带 execution_target；submit_run 沿用稳定 request_id。不接受任意 HTTP URL，失败不回退本机。"
       },
       "ModelTestInput": {
         "oneOf": [

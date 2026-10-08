@@ -12,8 +12,8 @@ import Dialog from 'primevue/dialog';
 import type {ModelCatalog} from './models';
 import MessageCopy from './components/MessageCopy.vue';
 const AssistantReply=defineAsyncComponent(()=>import('./components/AssistantReply.vue'));
-const emit=defineEmits<{configureModel:[target?:Target];archives:[value:boolean];manageLocal:[];networkSetup:[];view:[value:{session_id:string;title:string;selected:boolean;detail:boolean;archived:boolean;busy:boolean;active:boolean}]}>();
-const props=defineProps<{target?:Target;archived?:boolean;modelRevision?:number}>();
+const emit=defineEmits<{configureModel:[target?:Target];archives:[value:boolean];manageLocal:[];networkSetup:[mode:'create'|'join'];view:[value:{session_id:string;title:string;selected:boolean;detail:boolean;archived:boolean;busy:boolean;active:boolean}]}>();
+const props=defineProps<{archived?:boolean;modelRevision?:number}>();
 const catalog=ref<ModelCatalog>({connections:[],models:[],default_model_id:null});
 const model_picker=ref(false),model_saving=ref(false);
 const model_id=computed(()=>sessions.value.find(s=>s.session_id===selected.value)?.model_id??'');
@@ -23,7 +23,7 @@ async function choose_model(value:string){
   model_saving.value=false;
 }
 const execution_target=computed(()=>sessions.value.find(s=>s.session_id===selected.value)?.execution_target??undefined);
-async function load_models(){catalog.value=await agent_call('get_model_catalog',undefined,undefined,undefined,selected.value?execution_target.value:props.target) as unknown as ModelCatalog;}
+async function load_models(){catalog.value=await agent_call('get_model_catalog',undefined,undefined,undefined,execution_target.value) as unknown as ModelCatalog;}
 watch(()=>props.modelRevision,()=>action(load_models));
 async function open_models(){model_picker.value=true;await action(load_models);}
 function call(...args:Parameters<typeof agent_call>){return agent_call(args[0],args[1],args[2],args[3]);}
@@ -189,8 +189,23 @@ async function load_run_page(append:boolean,target:string,epoch:number){
 }
 async function select_session(){generation++;watching.clear();run_page_cursor=null;runs.value=[];snapshots.value={};unconfirmed.value=[];next_run_cursor.value=null;await action(load_models);await action(()=>load_pending());await action(()=>load_runs());}
 async function action(task:()=>Promise<void>){error.value='';try{await task();}catch(e){error.value=e instanceof Error?e.message:t('ui.operation_failed');}}
-const creating=ref(false),creation_request=shallowRef<Json>();
-async function create_session(){if(creating.value)return;creating.value=true;let created_id:string|undefined;await action(async()=>{creation_request.value??={session_id:crypto.randomUUID(),title:t('ui.new_conversation_2'),auto_title:true,...(props.target?{execution_target:{...props.target}}:{})};const session=await call('create_session',creation_request.value) as unknown as Session;creation_request.value=undefined;sessions.value=[session,...sessions.value.filter(s=>s.session_id!==session.session_id)];selected.value=session.session_id;created_id=session.session_id;list_open.value=false;await select_session();});creating.value=false;return created_id;}
+const creating=ref(false),creation_request=shallowRef<Json>(),creation_error=ref('');
+async function create_session(){
+  if(creating.value)return;
+  creating.value=true;creation_error.value='';
+  try{
+    // This device owns and orchestrates the conversation. Device browsing must
+    // never turn a new conversation into a whole-session execution link.
+    creation_request.value??={session_id:crypto.randomUUID(),title:t('ui.new_conversation_2'),auto_title:true};
+    const session=await call('create_session',creation_request.value) as unknown as Session;
+    creation_request.value=undefined;
+    sessions.value=[session,...sessions.value.filter(s=>s.session_id!==session.session_id)];
+    selected.value=session.session_id;list_open.value=false;
+    await select_session();
+    return session.session_id;
+  }catch(e){creation_error.value=e instanceof Error?e.message:String(e);}
+  finally{creating.value=false;}
+}
 async function send(){
   if(!selected.value||selected_archived.value||!message.value.trim()||sending.value||model_saving.value)return;
   sending.value=true;const target=selected.value;const input=message.value;
@@ -212,6 +227,7 @@ onBeforeUnmount(()=>{alive=false;generation++;watching.clear();if(poll)clearTime
 
 <template>
   <div class="chat-layout" :class="{'list-open':list_open,'detail-open':!list_open}">
+    <div v-if="creation_error" class="session-creation-error" role="alert"><p class="error">{{notice_text(creation_error)}}</p><MessageCopy :text="notice_text(creation_error)" :label="t('ui.copy_error')"/></div>
     <aside class="conversation-list" :aria-label="t('ui.conversation_list')"><Button v-if="props.archived" :label="t('ui.back_to_conversations')" text @click="emit('archives',false)"/><p v-if="props.archived" class="muted">{{t('ui.keep_history_and_restore_it_anytime_deleting_a')}}</p><p v-if="notice" role="status">{{notice_text(notice)}}</p><div v-for="session in sessions" :key="session.session_id" class="session-row"><button class="session-item" :class="{selected:selected===session.session_id}" @click="choose_session(session.session_id)"><i class="pi pi-comment" aria-hidden="true"/><span>{{session.title}}</span></button><Button :label="props.archived?t('ui.restore'):undefined" :icon="props.archived?'pi pi-replay':'pi pi-inbox'" text :aria-label="`${props.archived?t('ui.restore'):t('ui.archive')} ${session.title}`" :disabled="archive_busy" @click="lifecycle(props.archived?'restore_session':'archive_session',session.session_id)"/><Button v-if="props.archived" :label="t('ui.delete')" icon="pi pi-trash" text severity="danger" :aria-label="t('ui.delete')+' '+session.title" :disabled="archive_busy||delete_checking" @click="ask_delete(session)"/></div><button v-if="next_session_cursor" class="secondary" @click="action(()=>load_sessions(true))">{{t('ui.load_more_conversations')}}</button><p v-if="!sessions.length" class="muted">{{props.archived?t('ui.no_archived_conversations'):t('ui.no_conversations_yet_use_the_add_button_to')}}</p></aside>
     <div class="conversation-detail">
       <p v-if="error" class="error" role="alert">{{notice_text(error)}}</p>
@@ -220,7 +236,7 @@ onBeforeUnmount(()=>{alive=false;generation++;watching.clear();if(poll)clearTime
       <div v-if="unconfirmed.length" class="notice" role="status"><h3>{{t('linked.pending')}}</h3><p>{{t('linked.retry_help')}}</p><div v-for="item in unconfirmed" :key="item.request.request_id"><p class="pending-input">{{item.request.message}}</p><small>{{item.request.request_id}}</small><p v-if="item.error">{{notice_text(item.error.code+': '+item.error.message)}}</p><Button :label="t('linked.retry')" outlined :disabled="sending||selected_archived" @click="retry_submission(item)"/></div><Button v-if="pending_cursor" :label="t('linked.more')" text @click="action(()=>load_pending(true))"/></div>
       <p v-if="selected_archived" class="notice">{{t('ui.archived')}} {{format_datetime(sessions.find(s=>s.session_id===selected)?.archived_at)}} {{t('ui.history_is_read_only_tasks_continue_restore_to')}}</p><div v-if="!selected&&!props.archived" class="welcome-panel"><i class="pi pi-compass welcome-icon" aria-hidden="true"/><h1>{{t('ui.your_devices_wherever_you_roam')}}</h1><p class="data-slogan">{{t('ui.own_your_data_break_free_from_platforms')}}</p><p class="muted">{{t('ui.tell_rove_what_you_need_and_let_your')}}</p><Button :label="t('ui.start_a_conversation')" icon="pi pi-plus" @click="create_session"/></div>
 
-        <div v-if="sessions.find(s=>s.session_id===selected)?.kind==='network_onboarding'" class="message assistant"><div class="message-content"><span class="message-author">{{t('ui.rove_agent_network_setup')}}</span><div class="message-bubble"><p>{{t('ui.your_models_are_ready_would_you_like_to')}}</p><p>{{t('ui.after_creating_a_network_export_its_network_card')}}</p><div class="actions"><Button :label="t('ui.create_network')" outlined @click="emit('networkSetup')"/><Button :label="t('ui.join_network')" outlined @click="emit('networkSetup')"/></div></div></div></div>
+        <div v-if="sessions.find(s=>s.session_id===selected)?.kind==='network_onboarding'" class="message assistant"><div class="message-content"><span class="message-author">{{t('ui.rove_agent_network_setup')}}</span><div class="message-bubble"><p>{{t('ui.your_models_are_ready_would_you_like_to')}}</p><p>{{t('ui.after_creating_a_network_export_its_network_card')}}</p><div class="actions"><Button :label="t('ui.create_network')" outlined @click="emit('networkSetup','create')"/><Button :label="t('ui.join_network')" outlined @click="emit('networkSetup','join')"/></div></div></div></div>
         <div v-for="run in runs" :key="run.run_id" class="run-conversation">
           <div class="message user"><div class="message-content"><span class="message-author">{{t('ui.you')}}</span><div class="message-bubble"><p>{{run.input_message}}</p></div><MessageCopy :text="run.input_message" :label="t('ui.copy_message')"/></div></div>
           <div class="message assistant"><div class="avatar"><i class="pi pi-compass" aria-hidden="true"/></div><div class="message-content"><span class="message-author">rove-agent</span><div class="message-bubble"><AssistantReply v-if="snapshots[run.run_id]?.output_tail" :text="snapshots[run.run_id].output_tail" :streaming="!terminal(run.status)"/><p v-else-if="run.status!=='succeeded'">{{status_name(run.status)}}</p><div v-if="run.status!=='succeeded'" class="bubble-meta"><span>{{status_name(run.status)}}</span><Button v-if="!terminal(run.status)&&!selected_archived" :label="t('ui.cancel_this_job')" text size="small" @click="cancel(run.run_id)"/></div><p v-if="snapshots[run.run_id]?.sync_error" class="notice">{{t('linked.cached')}}</p><p v-if="snapshots[run.run_id]?.output_truncated" class="muted">{{t('ui.only_the_retained_output_tail_is_shown_earlier')}}</p><div v-if="run.error" class="message-error"><p class="error">{{notice_text((run.error.code?run.error.code+': ':'')+run.error.message)}}</p><MessageCopy :text="notice_text((run.error.code?run.error.code+': ':'')+run.error.message)" :label="t('ui.copy_error')"/></div></div></div></div>

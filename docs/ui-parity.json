@@ -1,6 +1,11 @@
 {
   "scope": "客户端入口映射，不等于 overlay、真实 WebView 或安装包验收",
   "operations": {
+    "list_device_aliases": {"cli":"call list_device_aliases（仅本机）","gui":"网络设备行显示本机别名；会话工具读取地址簿","source":"crates/rove-agent/src/device_aliases.rs"},
+    "set_device_alias": {"cli":"call set_device_alias（仅本机）","gui":"网络详情设备行编辑或清除本地别名","source":"apps/rove-gui/src/DevicePicker.vue"},
+    "resolve_device_alias": {"cli":"call resolve_device_alias（仅本机）","gui":"会话工具将本机名称解析为当前网络成员身份和地址","source":"crates/rove-agent/src/device_aliases.rs"},
+    "list_public_bootstrap_nodes": {"cli":"call list_public_bootstrap_nodes","gui":"创建/编辑网络时获取公共初始节点","source":"apps/rove-gui/src/NetworkForm.vue"},
+    "resolve_bootstrap_discovery": {"cli":"call resolve_bootstrap_discovery","gui":"初始节点测试与运行时使用共享发现解析，无独立解析按钮","source":"crates/rove-agent/src/bootstrap_discovery.rs"},
     "test_network_peer": {
       "cli": "network test-peer ENDPOINT",
       "gui": "初始节点逐条 TCP 连通测试；不冒充 EasyTier 入网认证",

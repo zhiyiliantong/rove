@@ -177,7 +177,7 @@ mod tests {
     use super::*;
     #[test]
     fn all_contract_examples() {
-        assert_eq!(AGENT.operations.len(), 49);
+        assert_eq!(AGENT.operations.len(), 54);
         assert_eq!(BLOBS.operations.len(), 3);
         for (source, contract) in [(AGENT_OPENAPI, &*AGENT), (BLOB_OPENAPI, &*BLOBS)] {
             let root: Value = serde_json::from_str(source).unwrap();
