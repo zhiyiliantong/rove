@@ -13,7 +13,11 @@ import {bridge} from './bridge.mjs';
 
 test('network form separates address modes, tests individual peers and exports a private card',async({page})=>{
   await bridge(page);await page.goto('/#/networks');
+  await expect(page.locator('.network-form')).toHaveCount(0);
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'创建网络',exact:true}).click();
   const form=page.locator('.network-form');
+  await expect(form.getByLabel('网络名称',{exact:true})).toHaveValue(/^net-[a-z0-9]{2}$/);
   await form.getByLabel('网络名称',{exact:true}).fill('我的网络');
   const key=form.locator('input[autocomplete="off"]');
   await expect(key).toHaveAttribute('type','password');
@@ -34,8 +38,12 @@ test('network form separates address modes, tests individual peers and exports a
   const created=await page.evaluate(()=>window.testBridge.createdNetwork);
   expect(created.config.dhcp).toBe(false);expect(created.config.ipv4_cidr).toBe('192.168.100.0/24');
   expect(created.local_ipv4).toBe('192.168.100.2');expect(created.config.local_ipv4).toBeUndefined();
-  await expect(page.locator('.network-card input')).toHaveAttribute('type','password');
+  await expect(page.locator('.network-card input')).toHaveCount(0);
   expect(await page.locator('.network-card textarea').inputValue()).not.toContain('local_ipv4');
+  await page.getByRole('button',{name:'返回网络',exact:true}).last().click();
+  await expect(page.locator('.network-card')).toHaveCount(0);
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'创建网络',exact:true}).click();
   await expect(form.getByLabel('地址模式')).toHaveValue('true');
   await form.getByLabel('网络名称',{exact:true}).fill('自动网络');
   await form.getByRole('button',{name:'创建网络',exact:true}).click();
@@ -44,16 +52,226 @@ test('network form separates address modes, tests individual peers and exports a
   expect(automatic.config.dhcp).toBe(true);expect(automatic.config.ipv4_cidr).toBeUndefined();expect(automatic.local_ipv4).toBeNull();
 });
 
+test('public, four discovery and seven connector protocols require selection and preserve original URIs',async({page})=>{
+  await bridge(page);await page.goto('/#/networks');
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'创建网络',exact:true}).click();
+  const form=page.locator('.network-form');
+  await form.getByRole('button',{name:'获取公共初始节点'}).click();
+  await expect(form.getByText('udp://public.fixture:7178',{exact:false})).toBeVisible();
+  await form.getByRole('button',{name:'使用公共节点 Fixture public node'}).click();
+  await expect(form.getByLabel('初始节点 1',{exact:true})).toHaveValue('udp://public.fixture:7178');
+  const discovery=['https://directory.fixture/node','http://directory.fixture/node','txt://seed.fixture','srv://seed.fixture'];
+  for(const url of discovery){
+    await form.getByRole('button',{name:'添加初始节点',exact:true}).click();
+    const peerNumber=await form.locator('.peer-row').count();
+    await form.getByLabel(`初始节点 ${peerNumber}`,{exact:true}).fill(url);
+    const peerRow=form.getByLabel(`初始节点 ${peerNumber}`,{exact:true}).locator('..');
+    await peerRow.getByRole('button',{name:'测试连通',exact:true}).click();
+    await expect(peerRow.getByText('本次测试使用解析后的节点：tcp://resolved.fixture:7196')).toBeVisible();
+    await expect(peerRow.getByText('TCP 可达（未验证入网）')).toBeVisible();
+    await expect(form.getByLabel(`初始节点 ${peerNumber}`,{exact:true})).toHaveValue(url);
+    await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='test_network_peer').at(-1)?.body.endpoint)).toBe('tcp://resolved.fixture:7196');
+  }
+  const connectors=['tcp://node.fixture:11010','udp://node.fixture:11010','ws://node.fixture:11011','wss://node.fixture:11012','wg://node.fixture:11013','quic://node.fixture:11014','faketcp://node.fixture:11015'];
+  for(const endpoint of connectors){
+    await form.getByRole('button',{name:'添加初始节点',exact:true}).click();
+    await form.getByLabel(`初始节点 ${await form.locator('.peer-row').count()}`,{exact:true}).fill(endpoint);
+  }
+  await form.getByRole('button',{name:'创建网络',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'网络名片',exact:true})).toBeVisible();
+  const created=await page.evaluate(()=>window.testBridge.createdNetwork);
+  expect(created.config.bootstrap_peers).toEqual(['udp://public.fixture:7178',...discovery,...connectors]);
+});
+
+test('device settings persist and clear the selected agent discovery service',async({page})=>{
+  await bridge(page);await page.goto('/#/settings');
+  const input=page.getByLabel('公共节点发现服务',{exact:true});
+  await expect(input).toHaveValue('');
+  await input.fill('https://directory.example');
+  await page.getByRole('button',{name:'保存设置',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='update_settings').at(-1)?.body.discovery_service_url)).toBe('https://directory.example');
+  await input.fill('');
+  await page.getByRole('button',{name:'保存设置',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='update_settings').at(-1)?.body.discovery_service_url)).toBeNull();
+});
+
+test('creation failures preserve input and card retry never creates a second network',async({page})=>{
+  await bridge(page);await page.goto('/#/networks');
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'创建网络',exact:true}).click();
+  const form=page.locator('.network-form'),name=form.getByLabel('网络名称',{exact:true});
+  await name.fill('保留输入');
+  await page.evaluate(()=>window.testBridge.failCreate=true);
+  await form.getByRole('button',{name:'创建网络',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('fixture create failed');
+  await expect(name).toHaveValue('保留输入');
+  await expect(page.getByRole('heading',{name:'网络名片',exact:true})).toHaveCount(0);
+  await page.evaluate(()=>{window.testBridge.failCreate=false;window.testBridge.failCard=true;});
+  await form.getByRole('button',{name:'创建网络',exact:true}).click();
+  await expect(page.getByText(/网络已创建，但暂时无法读取名片/).first()).toBeVisible();
+  await page.evaluate(()=>window.testBridge.failCard=false);
+  await page.getByRole('button',{name:'重试读取名片'}).click();
+  await expect(page.getByRole('heading',{name:'网络名片',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>window.testBridge.calls.filter(call=>call.operation_id==='create_network').length)).toBe(2);
+});
+
 test('desktop network file import requires review and uses the normal API',async({page})=>{
   await bridge(page);await page.goto('/#/networks');
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'加入网络',exact:true}).click();
   await expect(page.getByRole('button',{name:'扫描二维码',exact:true})).toHaveCount(0);
   const config={schema_version:1,network_id:'fixture',display_name:'imported',easytier:{network_secret:'test-only'}};
-  await page.getByLabel('读取网络配置文件').setInputFiles({name:'network.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(config))});
-  await expect(page.getByRole('status')).toHaveText(/检查配置后再确认导入/);
+  const encoded=Buffer.from(JSON.stringify(config)).toString('base64url');
+  await page.getByLabel('读取 Base64 网络配置文件').setInputFiles({name:'network.rove',mimeType:'text/plain',buffer:Buffer.from(encoded)});
+  await expect(page.getByRole('status')).toHaveText(/已读取并解码配置/);
   expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='import_network'))).toHaveLength(0);
-  await page.getByRole('button',{name:'导入手动配置',exact:true}).click();
+  await expect(page.getByPlaceholder('粘贴 Base64 网络配置')).toHaveValue(encoded);
+  await page.getByRole('button',{name:'解码并导入',exact:true}).click();
   const imported=await page.evaluate(()=>window.testBridge.calls.find(c=>c.operation_id==='import_network'));
   expect(imported.body).toEqual({source:'manual',config});
+  expect(await page.evaluate(()=>window.testBridge.calls.some(c=>c.operation_id==='create_network_share'||c.body?.source==='url'))).toBe(false);
+});
+
+for(const [width,height] of [[1100,760],[320,568],[390,844],[844,390]])test(`network details own their devices at ${width}px`,async({page})=>{
+  await page.setViewportSize({width,height});await bridge(page,{services:true,os:width<950?'android':'linux'});
+  await page.addInitScript(()=>{
+    const invoke=window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke=async(command,args)=>{
+      const result=await invoke(command,args);
+      if(args?.request?.operation_id==='list_network_devices'){
+        const network_id=args.request.path_parameters.network_id;
+        result.body.items=[{network_id,device_id:'00000000-0000-4000-8000-000000000222',display_name:network_id==='n1'?'家庭电脑':'工作电脑',os:'windows',arch:'x86_64',state:'online',capabilities:['system_exec'],overlay_addresses:['10.50.0.2'],last_error:null}];
+      }
+      return result;
+    };
+  });
+  await page.goto('/#/networks');
+  await expect(page.getByRole('button',{name:'查看设备',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'家庭网络',exact:true}).click();
+  await expect(page).toHaveURL(/#\/networks\/n1$/);
+  await expect(page.getByRole('heading',{name:'家庭网络',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'设备',exact:true})).toBeVisible();
+  await expect(page.getByText('家庭电脑',{exact:true})).toBeVisible();
+  await expect(page.getByText('工作电脑',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('combobox',{name:'网络',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'返回网络',exact:true}).click();
+  await page.getByRole('button',{name:'工作网络',exact:true}).click();
+  await expect(page.getByText('工作电脑',{exact:true})).toBeVisible();
+  await expect(page.getByText('家庭电脑',{exact:true})).toHaveCount(0);
+  expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='list_network_devices').map(c=>c.path_parameters.network_id))).toEqual(['n1','n2']);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('network details ignore stale network responses and reject devices from another network',async({page})=>{
+  await bridge(page,{services:true});await page.goto('/#/networks');
+  await page.evaluate(()=>{
+    const invoke=window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke=async(command,args)=>{
+      const result=await invoke(command,args),request=args?.request;
+      if(request?.operation_id==='get_network'&&request.path_parameters.network_id==='n1')await new Promise(resolve=>{window.testBridge.releaseNetwork=resolve;});
+      if(request?.operation_id==='list_network_devices')result.body.items=[{network_id:'n1',device_id:'wrong',display_name:'错误网络设备'}];
+      return result;
+    };
+  });
+  await page.getByRole('button',{name:'家庭网络',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>!!window.testBridge.releaseNetwork)).toBe(true);
+  await page.evaluate(()=>{location.hash='#/networks/n2';});
+  await expect(page.getByRole('heading',{name:'工作网络',exact:true})).toBeVisible();
+  await page.evaluate(()=>window.testBridge.releaseNetwork());
+  await expect(page.locator('.picker [role=alert]')).toBeVisible();
+  await expect(page.getByText('错误网络设备',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'工作网络',exact:true})).toBeVisible();
+});
+
+test('old device bookmarks cannot switch the local network context',async({page})=>{
+  await bridge(page,{services:true});await page.goto('/#/devices');
+  const target={network_id:'00000000-0000-4000-8000-000000000111',device_id:'00000000-0000-4000-8000-000000000222'};
+  await expect(page.getByRole('button',{name:'选择远端设备',exact:true})).toHaveCount(0);
+  await page.evaluate(()=>{location.hash='#/networks/n1';});
+  await expect(page.getByRole('heading',{name:'家庭网络',exact:true})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='list_network_devices').length)).toBeGreaterThan(0);
+  const calls=await page.evaluate(()=>window.testBridge.calls.filter(c=>['get_network','list_network_devices'].includes(c.operation_id)));
+  expect(calls.every(c=>c.path_parameters.network_id==='n1'&&c.target===undefined)).toBe(true);
+  await expect(page.locator('.picker').getByRole('button',{name:'选择设备',exact:true})).toHaveCount(0);
+});
+
+test('network tab keeps prototype list, card, create and join views separate',async({page})=>{
+  await bridge(page,{services:true});await page.goto('/#/networks');
+  await expect(page.locator('.network-page-heading')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'刷新',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'我的网络',exact:true})).toHaveCount(0);
+  await expect(page.getByText(/可保存、分享并加入多个网段/)).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'创建网络',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'加入网络',exact:true})).toHaveCount(0);
+  await expect(page.locator('.network-form')).toHaveCount(0);
+  await expect(page.getByPlaceholder('粘贴 Base64 网络配置')).toHaveCount(0);
+  await page.getByRole('button',{name:'家庭网络',exact:true}).click();
+  await page.getByRole('button',{name:'网络名片',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'网络名片',exact:true})).toBeVisible();
+  const payload=await page.getByLabel('Base64 网络配置（敏感）').inputValue();
+  const decoded=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  expect(decoded).toMatchObject({schema_version:1,network_id:'n1',display_name:'家庭网络'});
+  expect(payload).not.toContain('http://');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('img',{name:'网络分享二维码'})).toBeVisible();
+  expect(await page.evaluate(()=>window.testBridge.calls.find(c=>c.command==='network_config_qr').config)).toBe(payload);
+  await expect(page.getByRole('button',{name:'复制配置',exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('button',{name:'返回网络',exact:true})).toHaveText('');
+  await expect(page.getByRole('button',{name:/导出|保存二维码/})).toHaveCount(0);
+  expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='create_network_share'))).toHaveLength(0);
+  await page.getByRole('button',{name:'返回网络',exact:true}).last().click();
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'加入网络',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'加入网络',exact:true})).toBeVisible();
+  await expect(page.locator('.network-form')).toHaveCount(0);
+  await page.getByRole('button',{name:'返回网络',exact:true}).last().click();
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'创建网络',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'创建网络',exact:true})).toBeVisible();
+  await expect(page.locator('.network-form')).toHaveCount(1);
+  await expect(page.getByPlaceholder('粘贴 Base64 网络配置')).toHaveCount(0);
+});
+
+test('network card shows QR errors, retries and copies the same configuration on a narrow screen',async({page,context})=>{
+  await page.setViewportSize({width:390,height:844});
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await bridge(page,{services:true});await page.goto('/#/networks');
+  await page.evaluate(()=>{window.testBridge.failQr=true;});
+  await page.getByRole('button',{name:'家庭网络',exact:true}).click();
+  await page.getByRole('button',{name:'网络名片',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await expect(dialog.getByText('二维码生成失败或配置过长，请重试或复制配置。')).toBeVisible();
+  await page.evaluate(()=>{window.testBridge.failQr=false;});
+  await dialog.getByRole('button',{name:'重试二维码'}).click();
+  await expect(dialog.getByRole('img',{name:'网络分享二维码'})).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'重试二维码'})).toHaveCount(0);
+  const payload=await dialog.getByLabel('Base64 网络配置（敏感）').inputValue();
+  await dialog.getByRole('button',{name:'复制配置',exact:true}).click();
+  await expect(dialog.getByRole('status')).toHaveText('已复制');
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(payload);
+  for(const [width,height] of [[320,568],[390,844],[844,390]]){
+    await page.setViewportSize({width,height});
+    await expect.poll(async()=>Math.round((await dialog.boundingBox()).width)).toBe(width);
+    const box=await dialog.boundingBox();
+    expect(Math.round(box.x)).toBe(0);expect(Math.round(box.y)).toBe(0);expect(Math.round(box.height)).toBe(height);
+    await dialog.locator('.network-flow-body').evaluate(el=>{el.scrollTop=0;});
+    const back=dialog.getByRole('button',{name:'返回网络',exact:true}),copy=dialog.getByRole('button',{name:'复制配置',exact:true});
+    await expect(back).toHaveText('');
+    const backBefore=await back.boundingBox(),copyBefore=await copy.boundingBox();
+    expect(backBefore.y).toBeLessThan(30);expect(copyBefore.y+copyBefore.height).toBeLessThanOrEqual(height);
+    expect(copyBefore.y).toBeGreaterThan(height-100);
+    const qrBox=await dialog.getByRole('img',{name:'网络分享二维码'}).boundingBox();
+    expect(qrBox.y).toBeGreaterThanOrEqual(backBefore.y+backBefore.height);
+    expect(qrBox.y+qrBox.height).toBeLessThanOrEqual(copyBefore.y);
+    await dialog.locator('.network-flow-body').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+    expect((await back.boundingBox()).y).toBe(backBefore.y);expect((await copy.boundingBox()).y).toBe(copyBefore.y);
+  }
+  await page.setViewportSize({width:390,height:844});
+  await dialog.getByRole('button',{name:'返回网络',exact:true}).click();
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'加入网络',exact:true}).click();
+  await expect(page.getByRole('dialog').getByPlaceholder('粘贴 Base64 网络配置')).toBeVisible();
 });
 
 test('mobile scanner decodes real QR pixels, releases the camera, and waits for import',async({page})=>{
@@ -67,12 +285,14 @@ test('mobile scanner decodes real QR pixels, releases the camera, and waits for 
     }}});
   },network_qr);
   await page.goto('/#/networks');
+  await page.getByRole('button',{name:'全局添加',exact:true}).click();
+  await page.getByRole('button',{name:'加入网络',exact:true}).click();
   await page.getByRole('button',{name:'扫描二维码',exact:true}).click();
-  await expect(page.getByPlaceholder('含密钥的分享 URL')).toHaveValue(network_qr.url);
+  await expect(page.getByPlaceholder('粘贴 Base64 网络配置')).toHaveValue(network_qr.payload);
   expect(await page.evaluate(()=>window.testCameraStream.getTracks().every(t=>t.readyState==='ended'))).toBe(true);
   expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='import_network'))).toHaveLength(0);
-  await page.getByRole('button',{name:'导入配置',exact:true}).click();
-  expect(await page.evaluate(()=>window.testBridge.calls.find(c=>c.operation_id==='import_network').body)).toEqual({source:'url',url:network_qr.url});
+  await page.getByRole('button',{name:'解码并导入',exact:true}).click();
+  expect(await page.evaluate(()=>window.testBridge.calls.find(c=>c.operation_id==='import_network').body)).toEqual({source:'manual',config:network_qr.config});
 });
 
 test('service directory selects networks, reveals authentication safely and only opens web protocols',async({page})=>{
@@ -122,21 +342,20 @@ test('language switch preserves drafts, running jobs and original content, then 
   await expect(page.getByRole('heading',{name:'设置',exact:true})).toBeVisible();
 });
 
-test('linked conversation stays local across device selection and new sessions bind explicitly',async({page})=>{
+test('legacy linked conversation stays compatible but new sessions never bind to selected devices',async({page})=>{
   await bridge(page,{linked:true});await page.goto('/');
   const input=page.getByRole('textbox',{name:'消息',exact:true});await input.fill('keep origin draft');
   await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='get_model_catalog').at(-1)?.target?.device_id)).toBe('00000000-0000-4000-8000-000000000222');
   await page.evaluate(()=>location.hash='#/devices');
-  await page.getByRole('textbox',{name:'网络 ID',exact:true}).fill('00000000-0000-4000-8000-000000000333');
-  await page.getByRole('textbox',{name:'设备 ID',exact:true}).fill('00000000-0000-4000-8000-000000000444');
-  await page.getByRole('button',{name:'选择远端设备',exact:true}).click();
+  await expect(page.getByRole('button',{name:'选择远端设备',exact:true})).toHaveCount(0);
   await page.evaluate(()=>location.hash='#/sessions');await expect(input).toHaveValue('keep origin draft');
   await page.getByRole('button',{name:'模型配置',exact:true}).click();await page.getByRole('button',{name:'完成选择'}).click();
   await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='get_model_catalog').at(-1)?.target?.device_id)).toBe('00000000-0000-4000-8000-000000000222');
   await page.getByRole('button',{name:'全局添加',exact:true}).click();await page.getByRole('button',{name:'新会话',exact:true}).click();
   await expect(page.locator('.chat-title')).toContainText('新会话');
   const created=await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='create_session'));
-  expect(created).toHaveLength(1);expect(created[0].target).toBeUndefined();expect(created[0].body.execution_target.device_id).toBe('00000000-0000-4000-8000-000000000444');
+  expect(created).toHaveLength(1);expect(created[0].target).toBeUndefined();expect(created[0].body.execution_target).toBeUndefined();
+  await expect.poll(()=>page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='get_model_catalog').at(-1)?.target??null)).toBeNull();
   expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>['list_sessions','get_run','list_runs'].includes(c.operation_id)&&c.target))).toHaveLength(0);
 });
 
@@ -243,6 +462,7 @@ for(const width of [320,1440])test(`API sync selects an explicit peer and confir
   await expect(page.getByRole('button',{name:'同步本机 API 配置',exact:true})).toHaveCount(0);
   await page.evaluate(()=>location.hash='#/networks');
   expect(await page.evaluate(async()=>{await document.fonts.load('16px primeicons');return document.fonts.check('16px primeicons');})).toBe(true);
+  await page.getByRole('button',{name:'同步测试网络',exact:true}).click();
   await page.getByRole('button',{name:'同步本机 API 配置',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'同步本机 API 配置',exact:true});
   await expect(dialog.getByLabel('本机 API 连接')).toHaveValue('c1');
@@ -274,7 +494,8 @@ test('first model opens the agent-created network onboarding conversation',async
   await expect(page.getByText('rove-agent · 初始网络引导',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>window.testBridge.calls.filter(c=>c.operation_id==='create_session'))).toHaveLength(0);
   await page.getByRole('button',{name:'加入网络',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'网络',exact:true})).toBeVisible();
+  await expect(page.locator('.topbar strong')).toHaveText('网络');
+  await expect(page.getByRole('button',{name:'刷新',exact:true})).toBeVisible();
 });
 
 for (const width of [320, 390, 850, 1440]) test(`responsive layout and dark theme at ${width}px`, async ({ page }) => {

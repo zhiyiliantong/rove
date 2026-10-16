@@ -27,6 +27,12 @@ test('dates, numbers and controlled errors change without translating user conte
   set_locale('zh-CN');assert.notEqual(format_datetime('2026-09-17T08:00:00Z'),english);assert.match(notice_text('model_not_configured: diagnostic'),/配置模型/);assert.equal(state_label('running'),'运行中');
   assert.equal(notice_text('custom diagnostic'),'custom diagnostic');assert.equal(format_datetime('not-a-date'),'not-a-date');
 });
+test('runtime recovery stays distinct from terminal unavailable errors',()=>{
+  const recovery='overlay_unavailable: EasyTier runtime observation unavailable; retrying automatically in 30 seconds (stage: runtime_observation, os_error: None)';
+  set_locale('zh-CN');assert.match(notice_text(recovery),/正在自动重试/);
+  assert.doesNotMatch(notice_text('overlay_unavailable: native_isolation'),/自动重试/);
+  set_locale('en');assert.match(notice_text(recovery),/Retrying automatically/);
+});
 test('rich text localizes only controls and keeps exact copy sources and safety',()=>{
   const source='自定义标题 / Keep this text\n\n```sh\nprintf user-data\n```\n\n![用户图片](https://example.invalid/image.png)';
   set_locale('zh-CN');const chinese=renderRichText(source);set_locale('en');const english=renderRichText(source);

@@ -33,7 +33,7 @@ impl Drop for LocalAllocation {
     }
 }
 
-fn current_user_sddl() -> std::io::Result<Vec<u16>> {
+pub(crate) fn current_user_sddl() -> std::io::Result<Vec<u16>> {
     // SAFETY: all out pointers refer to live, correctly sized storage. Token
     // buffer uses usize elements to satisfy TOKEN_USER alignment. API-owned
     // strings remain alive until copied, then RAII releases their allocations.
@@ -79,7 +79,11 @@ fn current_user_sddl() -> std::io::Result<Vec<u16>> {
     }
 }
 
-fn create(path: &std::path::Path, sddl: &[u16], first: bool) -> std::io::Result<NamedPipeServer> {
+pub(crate) fn create(
+    path: &std::path::Path,
+    sddl: &[u16],
+    first: bool,
+) -> std::io::Result<NamedPipeServer> {
     // SAFETY: sddl is nul-terminated; the descriptor stays alive during the
     // synchronous CreateNamedPipe call, which copies its security information.
     unsafe {

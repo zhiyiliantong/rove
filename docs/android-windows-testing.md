@@ -1,6 +1,62 @@
 # Android / Windows 开发包与实机验证
 
-2026-09-10。以下是开发测试包，不是全平台正式发行版。
+更新于 2026-10-08。以下是开发测试包，不是全平台正式发行版。
+
+最新 r27：共享运行时状态观察失败保留启动意图并退避重试，显式停止仍有效，权限/安全失败不绕过。Windows r26 的页面资源缺失已在 r27 重编译并补充打包校验，240 覆盖安装后真实页面/资源加载、原生 get_device、正常网络启停及原数据保留通过。
+
+Android r27 已构建，APK SHA-256 `257f27171341ed587c6303da41e822526b2875fa084adb6290684677ed1c4daa`，v2 Debug 签名通过，与 r26 字节一致。原授权 242 Redroid 无法接入，**本轮 Android 尚未安装及原生验收**；未擅自改用 240 新连接的实体手机。正常 Windows 启停与共享故障注入单元测试不能代替 Android 原生恢复，不能宣称本轮 Windows–Android 组网已验收。旧 target_unreachable / Mihomo 调查按用户要求暂停。制品与完整边界见 [Windows 交付记录](windows-installer-delivery.md)。
+
+## 当前 r24 编辑后名片重新生成
+
+Windows 240 与 Android 14 arm64 Redroid 已覆盖安装并启动 r24。编辑保存后再次点击网络名片，重新读取最新配置并生成 Base64/二维码；旧异步结果不能覆盖新名片。两端真实安装版验证修改前后内容变化，实际原生二维码解码为最新 Base64，并与后端配置一致。临时网络已清理，原身份、12/18 个会话、模型、网络和别名保留。
+
+GUI 单元 30/30、完整浏览器 105/105、名片专项 5/5，四尺寸及原生截图已查看。具体制品、哈希、非实体手机/相机验收边界见 [r24 交付记录](windows-installer-delivery.md)。重连仍是独立未完成问题：间歇性恢复不等于修复，Rove 是否优先物理出口尚待用户确认；未擅自改变系统网络策略。
+
+## r23 网络编辑与保存自动重启（历史）
+
+Windows 240 和 Android 14 arm64 Redroid 已覆盖安装并启动 r23，移除“管理此设备”，网络编辑支持名称、初始节点和地址配置，key 只读且后端拒绝变更。运行中保存会提示短暂断连，并自动停止、保存、重新启动；两端实际观测到完整状态变化，原配置不变。停止网络只保存、不自动启动。
+
+GUI 单测 30/30、浏览器完整回归 104/104；桌面、320px 小屏、手机竖屏和紧凑横屏截图已查看，真实安装版编辑/自动重启和原数据保留通过。原 12/17 个会话保留，Android 另新增的非测试会话也保留；Windows 当前本机别名 `windows` 未改动。两端临时测试网络已清理。
+
+17:12 两端虽 running，双向目标 get_device 仍为 503；本轮不代表永久重连或 Windows–Android 组网验收通过。未修改系统网络策略，未做实体手机/真实软键盘完整验收。制品哈希及精确边界见 [r23 交付记录](windows-installer-delivery.md)。
+
+## r21 本机别名与原位编辑（历史）
+
+Windows 240 和 Android 14 arm64 Redroid 已覆盖安装并启动 r21；点击名称原位编辑，不再显示单独修改表单。完整浏览器回归 100/100，安装版原位展示/取消、Android 保存和外部点击失焦保存已验证；本机名称解析、重名拒绝、原数据保留通过。Windows 用户 `aa` 保持不变，Android 验收临时别名已清除。没有实体手机/完整中文软键盘验收。
+
+两端网络恢复 running，但 15:43 双向目标 API 仍为 target_unreachable；本次不计为组网或永久重连修复通过。制品哈希、原生覆盖范围及限制见 [r21 交付记录](windows-installer-delivery.md)。以下 r18/r17 为历史记录，不是当前安装版本。
+
+## Windows r18 中文输出与后续诊断
+
+240 已安装中文命令输出修复，原生 ping/stdout/stderr 和持久历史验证正常；随后加载保留该修复的 r19 诊断 agent，Android 保持 r17。系统选路再次复现重连失败；Rove-only 物理接口对照三次恢复，临时规则已撤销，永久默认出站策略尚待确认。当前事实与制品边界见 [交付记录](windows-installer-delivery.md)，不可把下文旧轮次结果当作已彻底解决重连。
+
+## 当前 r17 会话安装版验证
+
+Windows 240 与 Android 14 arm64 Redroid 均已覆盖安装并启动 r17，原身份、会话和设置保留。本机新建会话归属、Android 会话经 EasyTier 请求 Windows agent 实际执行命令并返回结果、停止目标网络后拒绝调用且不转本机执行，均取得原生证据。收尾恢复网络启停状态后，两端虽为 running，但截至 2026-09-29 10:31（Asia/Shanghai）双方目标调用仍为 target_unreachable，重连恢复尚未通过。完整制品、测试记录和限制见 [交付记录](windows-installer-delivery.md)。
+
+## r16 原生网络结果（历史）
+
+Windows 240 与 Android 14 Redroid 的安装版已完成真实 EasyTier 组网、双向设备发现/Rove 操作、分别停止失效及 Windows 物理网负向测试；原身份和配置保留。Android 使用应用自身 VpnService，Windows 使用普通 agent 与独立受限 helper。制品与完整边界见 [交付记录](windows-installer-delivery.md) 和 [原生验收](native-overlay-implementation.md)。不代表实体手机、软键盘或全部 connector 原生逐项互通通过。
+
+当前 Windows native 安装器构建（先完成 GUI 前端构建，使用经校验的官方驱动归档）：
+
+```sh
+cargo build --locked --target x86_64-pc-windows-gnu -p rove-agent -p rove-cli --features rove-agent/easytier-native
+cargo build --locked --target x86_64-pc-windows-gnu -p rove-gui --features custom-protocol
+python3 scripts/package-windows-setup.py \
+  --wintun-archive /path/to/wintun-0.14.1.zip \
+  --windivert-archive /path/to/WinDivert-2.2.2-A.zip \
+  --windivert-source /path/to/WinDivert-2.2.2-Source.zip \
+  --output target/packages/rove-windows-native-setup.exe
+```
+
+## 2026-09-23 发现功能增量包
+
+包含公共节点目录、四种发现 URI 和创建后网络名片界面的 Android arm64 Debug APK 已重新构建并覆盖安装到 Android 14 arm64 Redroid。`app.rove.desktop/.MainActivity` 冷启动成功并保持 resumed，真实 WebView 正常显示；制品、哈希、Windows 包状态和平台能力边界见 [Windows 安装包与 240 实机测试](windows-installer-delivery.md)。Android 仍无 native VPN/EasyTier 通道，Windows 包仍无 overlay runtime，故尚未完成 Windows–Android 组网。
+
+## 2026-09-21 Windows 安装器与 Android 双向网络实测
+
+每用户 NSIS 安装器落在 240 并完成干净安装、同版本升级、保留数据卸载与原生回归；随后与 242 上的 Android 14 arm64 容器做双向 TCP 探测，Windows 侧入站被本机防火墙挡住。制品校验和、证据文件与明确未覆盖项见 [Windows 安装包与 240 实机测试](windows-installer-delivery.md)。仍不是 Android → Windows 组网或控制验收。
 
 ## 2026-09-18 Android 原生布局与最新升级
 
@@ -16,7 +72,7 @@ Windows 11 测试机在新目录 `C:\Users\haobo\rove-check-20260917-2115` 运�
 
 管道使用 protected DACL，只有当前用户 SID 一条 allow ACE，不继承 Everyone/其他用户权限。匿名身份测试不等于另建普通账号登录测试；结合 DACL 检查验证本机同账号边界。不改系统账号、PATH、防火墙、网络服务或其他应用。此次同时在 Windows 验证存储检查、SQLite v2/v4 升级保留身份和内容、服务生命周期、会话归档及队列逻辑。没有据此宣称 Windows overlay 或安装器已经交付。
 
-## Windows x86_64
+## 早期 Windows x86_64 便携包（不含原生组网运行时）
 
 构建前先在 `apps/rove-gui` 执行 `npm ci && npm run build`，然后在仓库根目录执行：
 
@@ -39,12 +95,14 @@ rustup target add aarch64-linux-android
 # JAVA_HOME、ANDROID_HOME、NDK_HOME 指向本机工具目录
 cd apps/rove-gui
 npm ci
-npm run tauri -- android build --debug --target aarch64 --apk --ci
+ROVE_DISCOVERY_SERVICE_URL=http://10.1.2.237:8090 npm run tauri -- android build --debug --target aarch64 --apk --ci
 ```
+
+`ROVE_DISCOVERY_SERVICE_URL` 是 Android 包的编译期发现服务默认值，正式发布时替换为 HTTPS 域名。省略该变量则不预置发现服务；它不是设备运行时环境变量。Android agent 不读取系统 `app_process` 旁的 `rove-defaults.json`。默认值通过与 Windows 包相同的地址校验，仅完全匹配的预置私网 HTTP 地址可用于开发；用户保存的地址或显式清除均优先，覆盖安装不强制重置设置。
 
 Android 工程已纳入 `src-tauri/gen/android`。构建回调用 `npm run tauri`，不依赖开发机绝对路径。SDK、NDK、JNI 二进制和签名私钥不纳入源码。Debug APK 仅用于开发，正式签名、升级策略尚未验收。若依赖下载需要代理，Java 需配置自己的 HTTP/HTTPS 代理参数，不要把凭据写进仓库。
 
-移动端在应用生命周期内启动同一个 `rove-agent` library，Vue → Tauri → SDK → Unix socket → agent；数据库仍由 agent 独占。数据位于应用私有目录，禁用 Android backup。没有 native VPN、后台常驻和本机 shell 能力，也尚未完成 iOS 构建。因此 APK 编译成功不表示 Android 已能通过 overlay 管理 Windows。
+移动端在应用生命周期内启动同一个 `rove-agent` library，Vue → Tauri → SDK → Unix socket → agent；数据库仍由 agent 独占。数据位于应用私有目录，禁用 Android backup。Android r16 已包含 VpnService 与原生 EasyTier，后台运行受系统约束，仍不提供本机 shell；iOS 尚未完成构建。APK 编译本身不证明 overlay 成功，实际跨端验收另行记录。
 
 ## 无图形界面的 ARM Android 测试宿主
 

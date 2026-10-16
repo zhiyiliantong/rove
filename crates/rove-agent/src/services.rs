@@ -141,7 +141,10 @@ fn view(mut record: Value, state: &State) -> Value {
     record
 }
 impl Agent {
-    #[cfg(all(feature = "easytier", target_os = "linux"))]
+    #[cfg(all(
+        feature = "easytier",
+        any(target_os = "linux", target_os = "android", windows)
+    ))]
     pub(crate) async fn reconcile_service_overlay(
         &self,
         network: &str,
@@ -409,11 +412,11 @@ async fn bind_service(
     network: &str,
     address: SocketAddr,
 ) -> std::io::Result<TcpListener> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     if let (Some(interface), SocketAddr::V4(address)) = (state.interfaces.get(network), address) {
         return crate::http::bind_overlay(interface, address).map_err(std::io::Error::other);
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
     let _ = (state, network);
     // Only private tests may inject loopback. There is no production escape
     // hatch from the interface-bound overlay listener.

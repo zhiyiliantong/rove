@@ -42,7 +42,7 @@ onMounted(refresh);
       <template v-else-if="step===2">
         <span class="eyebrow">02 / CONNECT YOUR WORLD</span><h1>{{t('intro.network_title')}}</h1><p class="intro-description">{{t('intro.network_description')}}</p><NetworkWalkthrough/>
         <div class="intro-actions"><Button :label="t('intro.create')" icon="pi pi-plus" @click="network('create')"/><Button :label="t('intro.join')" icon="pi pi-sign-in" outlined @click="network('join')"/></div><p class="intro-trust">{{t('intro.network_trust')}}</p>
-        <p v-if="mobile" class="notice">{{t('ui.mobile_development_build_a_local_agent_is_embedded')}}</p><Button :label="t('intro.next')" text icon="pi pi-arrow-right" icon-pos="right" @click="emit('step',3)"/>
+        <p v-if="mobile" class="notice">{{t('ui.mobile_development_build_a_local_agent_is_embedded')}}</p>
       </template>
       <template v-else>
         <span class="intro-symbol"><i class="pi pi-comment" aria-hidden="true"/></span><span class="eyebrow">03 / MAKE IT YOURS</span><h1>{{t('intro.chat_title')}}</h1><p class="intro-description">{{t('intro.chat_description')}}</p>
@@ -50,8 +50,8 @@ onMounted(refresh);
         <p class="intro-draft-note">{{t('intro.draft_hint')}}</p><Button :label="t('ui.new_conversation')" icon="pi pi-plus" :disabled="loading" @click="start()"/>
       </template>
     </div>
-    <footer class="intro-footer"><Button v-if="step>0" :label="t('intro.back')" icon="pi pi-arrow-left" text @click="emit('step',step-1)"/><span v-else>{{t('intro.tagline')}}</span><span>{{step+1}} / 4</span><Button v-if="step===3" :label="t('intro.list')" text :disabled="loading||!verified||!!error" @click="finish"/><span v-else>{{t(verified?'intro.anytime':'model_test.required')}}</span></footer>
+    <footer class="intro-footer"><Button v-if="step>0" :label="t('intro.back')" icon="pi pi-arrow-left" text @click="emit('step',step-1)"/><span v-else>{{t('intro.tagline')}}</span><span>{{step+1}} / 4</span><Button v-if="step===3" :label="t('intro.list')" text :disabled="loading||!verified||!!error" @click="finish"/><Button v-else-if="step===2" :label="t('intro.next')" text icon="pi pi-arrow-right" icon-pos="right" @click="emit('step',3)"/><span v-else>{{t(verified?'intro.anytime':'model_test.required')}}</span></footer>
     <ModelPanel v-if="model_open" auto-add form-only require-test @changed="refresh();emit('modelsChanged')" @saved="saved" @close="model_open=false;pending_prompt=null"/>
-    <Dialog v-model:visible="network_open" modal :header="t('intro.'+network_mode)" :style="{width:'min(760px,94vw)'}"><NetworkPanel v-if="network_open" :mode="network_mode" active :mobile="mobile"/><template #footer><Button :label="t('intro.close')" text @click="network_open=false"/></template></Dialog>
+    <Dialog v-model:visible="network_open" class="network-dialog" modal :closable="false" :aria-label="t('intro.'+network_mode)" :style="{width:'38rem'}"><NetworkPanel v-if="network_open" :mode="network_mode" active :mobile="mobile" @done="network_open=false"/></Dialog>
   </section>
 </template>

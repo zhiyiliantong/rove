@@ -1,23 +1,94 @@
-//! Linux per-network lifecycle. Requests persist intent; this observer owns
+//! Shared per-network lifecycle. Requests persist intent; this observer owns
 //! RPC waits and listeners, so client disconnection cannot cancel accepted work.
 use crate::{Agent, http, overlay::EasyTier, storage_error};
+use anyhow::Context;
 use rove_protocol::{ApiError, contract::AGENT};
 use serde_json::{Value, json};
+#[cfg(not(target_os = "android"))]
+use std::{net::SocketAddr, path::Path};
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    path::Path,
+    net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
     time::Duration,
 };
 use tokio::{sync::Mutex, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
+const PEER_REFRESH_TIMEOUT: Duration = Duration::from_secs(8);
+const NETWORK_RECONCILE_TIMEOUT: Duration = Duration::from_secs(15);
+
+// A failed observation is not a request to stop the network. Keep the runtime
+// alive, but withdraw its business ingress until its facts can be verified.
+#[derive(Debug)]
+struct RuntimeObservation;
+impl std::fmt::Display for RuntimeObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("runtime_observation")
+    }
+}
+impl std::error::Error for RuntimeObservation {}
+
+#[derive(Default)]
+struct Recovery {
+    attempts: u32,
+    next: Option<std::time::Instant>,
+}
+impl Recovery {
+    fn defer(&mut self, now: std::time::Instant) -> Duration {
+        let delay = Duration::from_secs((1u64 << self.attempts.min(5)).min(30));
+        self.attempts = self.attempts.saturating_add(1);
+        self.next = Some(now + delay);
+        delay
+    }
+    fn waiting(&self, now: std::time::Instant) -> bool {
+        self.next.is_some_and(|next| now < next)
+    }
+}
+
+fn observation_can_retry(error: &anyhow::Error) -> bool {
+    // Native admission failures must never be downgraded to connectivity loss.
+    let admission_failed = error.chain().any(|cause| {
+        matches!(
+            cause.to_string().as_str(),
+            "native_vpn"
+                | "native_interface"
+                | "native_routes"
+                | "native_listener"
+                | "native_isolation"
+                | "native_firewall"
+                | "native_helper_start"
+        )
+    });
+    !admission_failed && error.is::<RuntimeObservation>()
+}
+
+#[path = "network_trace.rs"]
+mod network_trace;
+
+// Discovery performs hello, target verification, then get_device. A single
+// two-second round budget starves valid relayed peers even when each request
+// finishes within its own deadline. Keep the whole round bounded and cancellable.
+async fn peer_refresh_budget<F: std::future::Future>(
+    stopping: &CancellationToken,
+    work: F,
+) -> Option<F::Output> {
+    tokio::select! {
+        biased;
+        _ = stopping.cancelled() => None,
+        result = tokio::time::timeout(PEER_REFRESH_TIMEOUT, work) => result.ok(),
+    }
+}
+
 pub(crate) struct Driver {
-    client: EasyTier,
+    trace: Option<network_trace::Trace>,
+    #[cfg(target_os = "android")]
+    pub(crate) mobile: Arc<crate::overlay::mobile_vpn::MobileVpn>,
+    pub(crate) client: EasyTier,
     listener: String,
     port: u16,
     endpoints: Mutex<std::collections::BTreeMap<String, Endpoint>>,
     peers: std::sync::RwLock<std::collections::BTreeMap<String, Value>>,
+    recovery: std::sync::Mutex<std::collections::BTreeMap<String, Recovery>>,
 }
 struct Endpoint {
     subnet: ipnet::Ipv4Net,
@@ -34,12 +105,27 @@ impl Drop for Endpoint {
     }
 }
 impl Driver {
+    pub(crate) fn reset_recovery(&self, network: &str) {
+        self.recovery.lock().unwrap().remove(network);
+    }
+    fn recovery_waiting(&self, record: &Value) -> bool {
+        record["enabled"] == true
+            && self
+                .recovery
+                .lock()
+                .unwrap()
+                .get(record["network_id"].as_str().unwrap())
+                .is_some_and(|retry| retry.waiting(std::time::Instant::now()))
+    }
     pub(crate) async fn close(&self, agent: &Agent) {
         let ids: Vec<_> = self.endpoints.lock().await.keys().cloned().collect();
         for id in ids {
             self.close_network(agent, &id).await;
         }
         let _ = agent.stop_services(None).await;
+        #[cfg(target_os = "android")]
+        self.mobile.close().await;
+        self.client.shutdown_owned();
     }
     async fn close_network(&self, agent: &Agent, network: &str) {
         for peer in self.peers.write().unwrap().values_mut() {
@@ -62,6 +148,43 @@ impl Driver {
     }
 }
 impl Agent {
+    #[cfg(all(windows, feature = "easytier-native"))]
+    pub async fn configure_windows_easytier_pipe(
+        self: &Arc<Self>,
+        pipe: &Path,
+        pid: u32,
+        listener: String,
+        api_port: u16,
+    ) -> anyhow::Result<()> {
+        self.configure_network_driver(
+            EasyTier::windows_helper(pipe, pid).await?,
+            listener,
+            api_port,
+        )
+        .await
+    }
+    #[cfg(all(windows, feature = "easytier-native"))]
+    pub async fn configure_windows_easytier(
+        self: &Arc<Self>,
+        listener: String,
+        api_port: u16,
+    ) -> anyhow::Result<()> {
+        self.configure_network_driver(EasyTier::windows_native(), listener, api_port)
+            .await
+    }
+    #[cfg(all(target_os = "android", feature = "easytier-native"))]
+    pub async fn configure_android_easytier(
+        self: &Arc<Self>,
+        host: Arc<dyn crate::overlay::mobile_vpn::NativeVpnHost>,
+    ) -> anyhow::Result<()> {
+        self.configure_network_driver(
+            EasyTier::embedded(),
+            "tcp://0.0.0.0:11010".into(),
+            43190,
+            Arc::new(crate::overlay::mobile_vpn::MobileVpn::new(host)),
+        )
+        .await
+    }
     pub(crate) fn network_peers(&self, network: &str) -> Vec<Value> {
         self.network_driver
             .get()
@@ -122,13 +245,14 @@ impl Agent {
         let address = peer["overlay_addresses"][0]
             .as_str()
             .ok_or_else(|| ApiError::new(503, "target_unreachable", "No target address"))?;
-        rove_sdk::RemoteClient::on_interface(
+        rove_sdk::RemoteClient::on_overlay(
             format!("http://{address}:{}", driver.port)
                 .parse()
                 .map_err(|_| ApiError::invalid("Invalid discovered address"))?,
             target.network_id,
             target.device_id,
             &endpoint.interface,
+            endpoint.address,
         )
         .map_err(|_| {
             ApiError::new(
@@ -191,14 +315,19 @@ impl Agent {
         let work = stream::iter(candidates)
             .map(|(ip, peer_id)| async move {
                 let base: url::Url = format!("http://{ip}:{}", driver.port).parse().ok()?;
-                let hello = rove_sdk::RemoteClient::discover(base.clone(), network_id, interface)
-                    .await
-                    .ok()?;
+                let hello = rove_sdk::RemoteClient::discover_on_overlay(
+                    base.clone(),
+                    network_id,
+                    interface,
+                    address,
+                )
+                .await
+                .ok()?;
                 let (key, mut peer) = peer_from_hello(network_id, ip, &peer_id, &hello)?;
                 let device_id = peer["device_id"].as_str()?.parse().ok()?;
                 if peer["state"] == "online" {
-                    let client = rove_sdk::RemoteClient::on_interface(
-                        base, network_id, device_id, interface,
+                    let client = rove_sdk::RemoteClient::on_overlay(
+                        base, network_id, device_id, interface, address,
                     )
                     .ok()?;
                     let response = client
@@ -217,7 +346,7 @@ impl Agent {
             })
             .buffer_unordered(16);
         tokio::pin!(work);
-        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        let _ = peer_refresh_budget(&self.runtime.stopping, async {
             while let Some(result) = work.next().await {
                 if let Some((key, peer)) = result
                     && (refreshed.len() < 4096 || refreshed.contains_key(&key))
@@ -237,6 +366,7 @@ impl Agent {
 
     /// Configure the explicitly selected local service, never a remotely
     /// supplied endpoint. This does not start any network until enabled=true.
+    #[cfg(not(target_os = "android"))]
     pub async fn configure_easytier(
         self: &Arc<Self>,
         portal: SocketAddr,
@@ -244,24 +374,7 @@ impl Agent {
         listener: String,
         api_port: u16,
     ) -> anyhow::Result<()> {
-        let _guard = self.network_lifecycle.lock().await;
-        anyhow::ensure!(
-            self.network_driver.get().is_none(),
-            "Network driver already configured"
-        );
-        anyhow::ensure!(api_port != 0, "Agent overlay port must be nonzero");
         let client = EasyTier::connect(portal)?;
-        let endpoint: url::Url = listener.parse()?;
-        anyhow::ensure!(
-            endpoint.scheme() == "tcp"
-                && endpoint.host().is_some()
-                && endpoint.port().is_some()
-                && endpoint.username().is_empty()
-                && endpoint.password().is_none()
-                && endpoint.query().is_none()
-                && endpoint.fragment().is_none(),
-            "Expected an explicit TCP overlay listener"
-        );
         let mut command = tokio::process::Command::new(core);
         command
             .arg("--version")
@@ -274,16 +387,60 @@ impl Agent {
                     == format!("easytier-core {}", crate::overlay::EASYTIER_VERSION),
             "EasyTier binary version does not match the pinned adapter"
         );
+        self.configure_network_driver(client, listener, api_port)
+            .await
+    }
+
+    /// Uses the same state observer and discovery as an external daemon.
+    /// Native platform permissions must already be available to this process.
+    #[cfg(all(feature = "easytier-native", not(target_os = "android")))]
+    pub async fn configure_embedded_easytier(
+        self: &Arc<Self>,
+        listener: String,
+        api_port: u16,
+    ) -> anyhow::Result<()> {
+        self.configure_network_driver(EasyTier::embedded(), listener, api_port)
+            .await
+    }
+
+    async fn configure_network_driver(
+        self: &Arc<Self>,
+        client: EasyTier,
+        listener: String,
+        api_port: u16,
+        #[cfg(target_os = "android")] mobile: Arc<crate::overlay::mobile_vpn::MobileVpn>,
+    ) -> anyhow::Result<()> {
+        let _guard = self.network_lifecycle.lock().await;
+        anyhow::ensure!(
+            self.network_driver.get().is_none(),
+            "Network driver already configured"
+        );
+        anyhow::ensure!(api_port != 0, "Agent overlay port must be nonzero");
+        let endpoint: url::Url = listener.parse()?;
+        anyhow::ensure!(
+            endpoint.scheme() == "tcp"
+                && endpoint.host().is_some()
+                && endpoint.port().is_some()
+                && endpoint.username().is_empty()
+                && endpoint.password().is_none()
+                && endpoint.query().is_none()
+                && endpoint.fragment().is_none(),
+            "Expected an explicit TCP overlay listener"
+        );
         self.store.connection.lock().unwrap().execute(
-            "UPDATE networks SET record=json_set(record,'$.state',CASE WHEN json_extract(record,'$.enabled')=1 THEN 'starting' ELSE 'stopping' END,'$.overlay_addresses',json('[]'),'$.last_error',NULL,'$.updated_at',?1) WHERE json_extract(record,'$.enabled')=1 OR json_extract(record,'$.state')<>'stopped'", [rove_core::now()],
+            "UPDATE networks SET record=json_set(record,'$.state',CASE WHEN json_extract(record,'$.enabled')=1 THEN 'starting' ELSE 'stopping' END,'$.overlay_addresses',json('[]'),'$.last_error',NULL,'$.updated_at',?1) WHERE json_extract(record,'$.enabled')=1 OR json_extract(record,'$.state') NOT IN ('stopped','failed')", [rove_core::now()],
         )?;
         self.network_driver
             .set(Driver {
+                trace: network_trace::Trace::open(&self.store.data_dir),
+                #[cfg(target_os = "android")]
+                mobile,
                 client,
                 listener,
                 port: api_port,
                 endpoints: Mutex::new(std::collections::BTreeMap::new()),
                 peers: std::sync::RwLock::new(std::collections::BTreeMap::new()),
+                recovery: Default::default(),
             })
             .map_err(|_| anyhow::anyhow!("Network driver already configured"))?;
         let weak = Arc::downgrade(self);
@@ -335,6 +492,33 @@ impl Agent {
             driver.close(self).await;
             return;
         };
+        #[cfg(target_os = "android")]
+        if !driver.mobile.ready() {
+            driver.close(self).await;
+            for mut record in records {
+                if record["enabled"] != true {
+                    if record["state"] == "stopping" {
+                        record["state"] = json!("stopped");
+                        record["overlay_addresses"] = json!([]);
+                        record["overlay_cidr"] = Value::Null;
+                        record["last_error"] = Value::Null;
+                        let _ = self.save_network_state(&record);
+                    }
+                    continue;
+                }
+                record["enabled"] = json!(false);
+                record["state"] = json!("failed");
+                record["overlay_addresses"] = json!([]);
+                record["overlay_cidr"] = Value::Null;
+                record["last_error"] = json!(ApiError::new(
+                    503,
+                    "overlay_permission_required",
+                    "Android VPN permission or foreground service is unavailable; start the network again to authorize"
+                ));
+                let _ = self.save_network_state(&record);
+            }
+            return;
+        }
         // Existing admitted networks win against newly obtained DHCP subnets.
         // Stop conflicting TUNs before validating any surviving listener.
         let active: Vec<_> = driver.endpoints.lock().await.keys().cloned().collect();
@@ -347,6 +531,9 @@ impl Agent {
         let mut admitted = Vec::new();
         for record in &mut records {
             if record["enabled"] != true {
+                continue;
+            }
+            if driver.recovery_waiting(record) {
                 continue;
             }
             if record["last_error"]["code"] == "network_subnet_conflict" {
@@ -363,6 +550,8 @@ impl Agent {
                 {
                     let id = record["network_id"].as_str().unwrap();
                     driver.close_network(self, id).await;
+                    #[cfg(target_os = "android")]
+                    let _ = driver.mobile.remove(id.parse().unwrap()).await;
                     let _ =
                         tokio::time::timeout(Duration::from_secs(3), driver.client.stop(instance))
                             .await;
@@ -381,29 +570,116 @@ impl Agent {
         }
         for mut record in records {
             let id = record["network_id"].as_str().unwrap().to_owned();
+            if driver.recovery_waiting(&record) {
+                continue;
+            }
             if record["enabled"] == true
                 && record["last_error"]["code"] == "network_subnet_conflict"
             {
                 driver.close_network(self, &id).await;
                 let instance = record["instance_id"].as_str().unwrap().parse().unwrap();
+                #[cfg(target_os = "android")]
+                let _ = driver.mobile.remove(id.parse().unwrap()).await;
                 let _ = tokio::time::timeout(Duration::from_secs(3), driver.client.stop(instance))
                     .await;
             } else {
                 let result = tokio::time::timeout(
-                    Duration::from_secs(8),
+                    NETWORK_RECONCILE_TIMEOUT,
                     self.reconcile_network(driver, &mut record),
                 )
                 .await;
                 if !matches!(result, Ok(Ok(()))) {
+                    let retry = match &result {
+                        Err(_) => true,
+                        Ok(Err(error)) => observation_can_retry(error),
+                        _ => false,
+                    };
+                    // Never forward arbitrary upstream errors: they can contain
+                    // discovery URLs or join secrets. Emit only known phases
+                    // and numeric OS errors for native diagnosis/copy support.
+                    let phase = match &result {
+                        Err(_) => "deadline".to_owned(),
+                        Ok(Err(error)) => error
+                            .chain()
+                            .map(|cause| cause.to_string())
+                            .find(|cause| {
+                                matches!(
+                                    cause.as_str(),
+                                    "native_vpn"
+                                        | "native_interface"
+                                        | "native_routes"
+                                        | "native_listener"
+                                        | "native_isolation"
+                                        | "native_firewall"
+                                        | "native_helper_start"
+                                        | "native_helper_state"
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                if observation_can_retry(error) {
+                                    "runtime_observation"
+                                } else {
+                                    "runtime"
+                                }
+                                .into()
+                            }),
+                        _ => unreachable!(),
+                    };
+                    let os_error = result
+                        .as_ref()
+                        .ok()
+                        .and_then(|r| r.as_ref().err())
+                        .and_then(|e| e.downcast_ref::<std::io::Error>())
+                        .and_then(std::io::Error::raw_os_error);
+                    eprintln!("overlay network {id}: stage={phase}, os_error={os_error:?}");
                     driver.close_network(self, &id).await;
+                    if retry {
+                        let delay = driver
+                            .recovery
+                            .lock()
+                            .unwrap()
+                            .entry(id.clone())
+                            .or_default()
+                            .defer(std::time::Instant::now());
+                        record["state"] = json!(if record["enabled"] == true {
+                            "starting"
+                        } else {
+                            "stopping"
+                        });
+                        record["overlay_addresses"] = json!([]);
+                        record["overlay_cidr"] = Value::Null;
+                        record["last_error"] = json!(ApiError::new(
+                            503,
+                            "overlay_unavailable",
+                            &format!(
+                                "EasyTier runtime observation unavailable; retrying automatically in {} seconds (stage: {phase}, os_error: {os_error:?})",
+                                delay.as_secs()
+                            )
+                        ));
+                        record["updated_at"] = json!(rove_core::now());
+                        let _ = self.save_network_state(&record);
+                        continue;
+                    }
+                    driver.reset_recovery(&id);
+                    #[cfg(target_os = "android")]
+                    let _ = driver.mobile.remove(id.parse().unwrap()).await;
+                    if driver.client.owns_runtime() {
+                        let instance = record["instance_id"].as_str().unwrap().parse().unwrap();
+                        let _ = driver.client.stop(instance).await;
+                        record["enabled"] = json!(false);
+                    }
                     record["state"] = json!("failed");
                     record["overlay_addresses"] = json!([]);
                     record["overlay_cidr"] = Value::Null;
                     record["last_error"] = json!(ApiError::new(
                         503,
                         "overlay_unavailable",
-                        "EasyTier state or isolated listener could not be established; inspect the local network service"
+                        &format!(
+                            "EasyTier state or isolated listener could not be established (stage: {phase}, os_error: {os_error:?})"
+                        )
                     ));
+                } else if matches!(record["state"].as_str(), Some("running" | "stopped")) {
+                    driver.reset_recovery(&id);
                 }
             }
             record["updated_at"] = json!(rove_core::now());
@@ -420,20 +696,35 @@ impl Agent {
     ) -> anyhow::Result<()> {
         let id = record["network_id"].as_str().unwrap().to_owned();
         let instance = record["instance_id"].as_str().unwrap().parse()?;
-        let instances = driver.client.list_instances().await?;
+        let instances = driver
+            .client
+            .list_instances()
+            .await
+            .context(RuntimeObservation)?;
         if record["enabled"] == false {
             driver.close_network(self, &id).await;
+            #[cfg(target_os = "android")]
+            driver.mobile.remove(id.parse()?).await?;
             if instances.contains(&instance) {
                 driver.client.stop(instance).await?;
             }
             anyhow::ensure!(
-                !driver.client.list_instances().await?.contains(&instance),
+                !driver
+                    .client
+                    .list_instances()
+                    .await
+                    .context(RuntimeObservation)?
+                    .contains(&instance),
                 "Network exit not confirmed"
             );
-            record["state"] = json!("stopped");
+            // Cleanup after a failed start is not an explicit stop request.
+            // Keep the diagnostic until the user retries or requests stop.
+            if record["state"] != "failed" {
+                record["state"] = json!("stopped");
+                record["last_error"] = Value::Null;
+            }
             record["overlay_addresses"] = json!([]);
             record["overlay_cidr"] = Value::Null;
-            record["last_error"] = Value::Null;
             return Ok(());
         }
         // Do not adopt, overwrite or remove instances belonging to another app.
@@ -452,6 +743,8 @@ impl Agent {
         );
         if !instances.contains(&instance) {
             driver.close_network(self, &id).await;
+            #[cfg(target_os = "android")]
+            driver.mobile.remove(id.parse()?).await?;
             let mut listener: url::Url = record["listener_url"]
                 .as_str()
                 .unwrap_or(&driver.listener)
@@ -492,8 +785,15 @@ impl Agent {
             record["last_error"] = Value::Null;
             return Ok(());
         }
-        let info = driver.client.info(instance).await?;
+        let info = driver
+            .client
+            .info(instance)
+            .await
+            .context(RuntimeObservation)?;
         let info = &info["map"][instance.to_string()];
+        if let Some(trace) = &driver.trace {
+            trace.record(&id, info);
+        }
         anyhow::ensure!(
             info.is_object() && info["error_msg"].as_str().is_none_or(str::is_empty),
             "Network instance failed"
@@ -546,11 +846,29 @@ impl Agent {
             !overlaps,
             "Overlay subnet overlaps another admitted network"
         );
+        #[cfg(target_os = "android")]
+        let native_interface = driver
+            .mobile
+            .admit(
+                crate::overlay::vpn_plan::VpnNetwork {
+                    network_id: id.parse()?,
+                    instance_id: instance,
+                    address,
+                    subnet,
+                },
+                |fd| driver.client.attach_tun(instance, fd),
+            )
+            .await
+            .context("native_vpn")?;
+        #[cfg(target_os = "android")]
+        let interface = native_interface.as_str();
+        #[cfg(not(target_os = "android"))]
         let interface = info["dev_name"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing TUN interface"))?;
-        let interface_index = http::validate_overlay(interface, address)?;
-        http::check_overlay_subnet(interface, subnet)?;
+        let interface_index =
+            http::validate_overlay(interface, address).context("native_interface")?;
+        http::check_overlay_subnet(interface, subnet).context("native_routes")?;
         let same = driver.endpoints.lock().await.get(&id).is_some_and(|e| {
             e.subnet == subnet
                 && e.interface == interface
@@ -560,7 +878,8 @@ impl Agent {
         });
         if !same {
             driver.close_network(self, &id).await;
-            let listener = http::bind_overlay(interface, SocketAddrV4::new(address, driver.port))?;
+            let listener = http::bind_overlay(interface, SocketAddrV4::new(address, driver.port))
+                .context("native_listener")?;
             let stopping = self.runtime.stopping.child_token();
             let task = tokio::spawn(http::serve_bound(
                 self.clone(),
@@ -629,6 +948,234 @@ fn peer_from_hello(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_backs_off_with_a_cap_and_admission_errors_do_not_retry() {
+        let now = std::time::Instant::now();
+        let mut recovery = Recovery::default();
+        assert!(!recovery.waiting(now));
+        for seconds in [1, 2, 4, 8, 16, 30, 30, 30] {
+            assert_eq!(recovery.defer(now), Duration::from_secs(seconds));
+            assert!(recovery.waiting(now));
+            assert!(!recovery.waiting(now + Duration::from_secs(seconds)));
+        }
+        assert!(observation_can_retry(
+            &anyhow::anyhow!("connection reset").context(RuntimeObservation)
+        ));
+        assert!(!observation_can_retry(&anyhow::anyhow!(
+            "Network instance failed"
+        )));
+        for phase in [
+            "native_vpn",
+            "native_interface",
+            "native_routes",
+            "native_listener",
+            "native_isolation",
+            "native_firewall",
+            "native_helper_start",
+        ] {
+            assert!(!observation_can_retry(
+                &anyhow::anyhow!(phase).context(RuntimeObservation)
+            ));
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn observation_failure_preserves_intent_and_explicit_stop_cancels_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Arc::new(Agent::open(&directory.path().join("agent")).unwrap());
+        let mut record = agent
+            .dispatch(
+                &rove_protocol::Request::new("create_network")
+                    .with_body(json!({"display_name":"recovery-test"})),
+            )
+            .await
+            .unwrap()
+            .1
+            .unwrap();
+        let id = record["network_id"].as_str().unwrap().to_owned();
+        record["enabled"] = json!(true);
+        record["state"] = json!("running");
+        agent.save_network_state(&record).unwrap();
+        // A real refused management connection exercises the observer failure
+        // path without granting TUN privileges or altering the host network.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let unavailable = listener.local_addr().unwrap();
+        drop(listener);
+        agent
+            .network_driver
+            .set(Driver {
+                trace: None,
+                client: EasyTier::connect(unavailable).unwrap(),
+                listener: "tcp://0.0.0.0:11010".into(),
+                port: 43190,
+                endpoints: Mutex::new(Default::default()),
+                peers: std::sync::RwLock::new(Default::default()),
+                recovery: Default::default(),
+            })
+            .ok()
+            .unwrap();
+        agent.network_tick().await;
+        let driver = agent.network_driver.get().unwrap();
+        let record = agent.network(&id).unwrap().0;
+        assert_eq!(record["enabled"], true);
+        assert_eq!(record["state"], "starting");
+        assert_eq!(record["last_error"]["code"], "overlay_unavailable");
+        assert!(
+            record["last_error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("retrying automatically")
+        );
+        assert!(record["overlay_addresses"].as_array().unwrap().is_empty());
+        assert!(driver.endpoints.lock().await.is_empty());
+        assert!(driver.recovery_waiting(&record));
+        agent.network_tick().await;
+        assert_eq!(driver.recovery.lock().unwrap()[&id].attempts, 1);
+        driver.recovery.lock().unwrap().get_mut(&id).unwrap().next = None;
+        agent.network_tick().await;
+        assert_eq!(driver.recovery.lock().unwrap()[&id].attempts, 2);
+        assert_eq!(agent.network(&id).unwrap().0["enabled"], true);
+        agent
+            .dispatch(&rove_protocol::Request::new("stop_network").with_path("network_id", &id))
+            .await
+            .unwrap();
+        assert!(!driver.recovery.lock().unwrap().contains_key(&id));
+        let record = agent.network(&id).unwrap().0;
+        assert_eq!(record["enabled"], false);
+        assert_eq!(record["state"], "stopping");
+        agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn configuring_runtime_preserves_recovering_network_intent() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Arc::new(Agent::open(&directory.path().join("agent")).unwrap());
+        let mut record = agent
+            .dispatch(
+                &rove_protocol::Request::new("create_network")
+                    .with_body(json!({"display_name":"recover-after-agent-restart"})),
+            )
+            .await
+            .unwrap()
+            .1
+            .unwrap();
+        record["enabled"] = json!(true);
+        record["state"] = json!("starting");
+        agent.save_network_state(&record).unwrap();
+        // Inspect initialization only; do not create a native TUN in this test.
+        agent.runtime.stopping.cancel();
+        agent
+            .configure_network_driver(EasyTier::embedded(), "tcp://0.0.0.0:11010".into(), 43190)
+            .await
+            .unwrap();
+        let retained = agent
+            .network(record["network_id"].as_str().unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(retained["enabled"], true);
+        assert_eq!(retained["state"], "starting");
+        agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn peer_discovery_budget_allows_three_relay_round_trips() {
+        let result = peer_refresh_budget(&CancellationToken::new(), async {
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_millis(800)).await;
+            }
+            "verified device"
+        })
+        .await;
+        assert_eq!(result, Some("verified device"));
+    }
+
+    #[tokio::test]
+    async fn peer_discovery_budget_is_bounded_and_cancellable() {
+        // An unreachable candidate must finish its discovery round without
+        // timing out the enclosing native network reconciliation.
+        assert!(NETWORK_RECONCILE_TIMEOUT > PEER_REFRESH_TIMEOUT + Duration::from_secs(3));
+        let stopping = CancellationToken::new();
+        stopping.cancel();
+        assert!(
+            peer_refresh_budget(&stopping, std::future::pending::<()>())
+                .await
+                .is_none()
+        );
+        let started = std::time::Instant::now();
+        assert!(
+            peer_refresh_budget(&CancellationToken::new(), std::future::pending::<()>())
+                .await
+                .is_none()
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn failed_disabled_network_keeps_diagnostic_until_explicit_stop() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Arc::new(Agent::open(&directory.path().join("agent")).unwrap());
+        let driver = Driver {
+            trace: None,
+            client: EasyTier::embedded(),
+            listener: "tcp://0.0.0.0:11010".into(),
+            port: 43190,
+            endpoints: Mutex::new(Default::default()),
+            peers: std::sync::RwLock::new(Default::default()),
+            recovery: Default::default(),
+        };
+        let error = json!({"code":"overlay_unavailable","message":"native_vpn"});
+        let mut record = json!({
+            "network_id":uuid::Uuid::new_v4(), "instance_id":uuid::Uuid::new_v4(),
+            "enabled":false,"state":"failed","last_error":error
+        });
+        for _ in 0..2 {
+            agent.reconcile_network(&driver, &mut record).await.unwrap();
+            assert_eq!(record["state"], "failed");
+            assert_eq!(record["last_error"], error);
+        }
+        record["state"] = json!("stopping");
+        agent.reconcile_network(&driver, &mut record).await.unwrap();
+        assert_eq!(record["state"], "stopped");
+        assert!(record["last_error"].is_null());
+        agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn configuring_runtime_preserves_a_disabled_network_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = Arc::new(Agent::open(&directory.path().join("agent")).unwrap());
+        let mut record = agent
+            .dispatch(
+                &rove_protocol::Request::new("create_network")
+                    .with_body(json!({"display_name":"retained-error"})),
+            )
+            .await
+            .unwrap()
+            .1
+            .unwrap();
+        record["enabled"] = json!(false);
+        record["state"] = json!("failed");
+        let error =
+            json!({"code":"overlay_unavailable","message":"native_interface","retryable":true});
+        record["last_error"] = error.clone();
+        agent.save_network_state(&record).unwrap();
+        agent
+            .configure_network_driver(EasyTier::embedded(), "tcp://0.0.0.0:11010".into(), 43190)
+            .await
+            .unwrap();
+        let retained = agent
+            .network(record["network_id"].as_str().unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(retained["state"], "failed");
+        assert_eq!(retained["last_error"], error);
+        agent.shutdown().await;
+    }
 
     #[tokio::test]
     async fn hello_classification_uses_stable_identity_not_current_peer_or_address() {

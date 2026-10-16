@@ -21,3 +21,6 @@
 #-renamesourcefileattribute SourceFile
 # Loaded via JNI; shrinking must not remove the Android certificate verifier.
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
+# Called by the Rust native VPN adapter through JNI.
+-keep, includedescriptorclasses class app.rove.desktop.RoveVpnController { *; }
+-keepclasseswithmembernames class app.rove.desktop.MainActivity { native <methods>; }

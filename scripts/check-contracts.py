@@ -64,7 +64,7 @@ for case in cases:
     check = validator(document, document["components"]["schemas"][case["schema"]])
     assert check.is_valid(case["value"]) == case["valid"], case["schema"]
 
-assert len(operations) == 52, "Update acceptance mapping when the API changes"
+assert len(operations) == 57, "Update acceptance mapping when the API changes"
 parity = json.loads((ROOT / "docs/ui-parity.json").read_text())
 agent_operations = {node["operationId"] for node in walk(documents["rove-agent.openapi.json"]) if "operationId" in node}
 assert set(parity["operations"]) == agent_operations, "Synchronize GUI/CLI operation matrix"

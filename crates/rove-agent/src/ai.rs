@@ -172,8 +172,11 @@ async fn execute_with<M: CompletionModel + Clone + 'static>(
     let session = run["session_id"].as_str().unwrap();
     let mut history = agent.rig_history(session)?;
     let source: Value = serde_json::from_str(rove_protocol::AGENT_OPENAPI).unwrap();
+    let mut management_schema = source["components"]["schemas"]["RoveApiInput"].clone();
+    management_schema["properties"]["target"] =
+        source["components"]["schemas"]["SocketTarget"].clone();
     let mut tools=vec![ToolDefinition{name:"system_exec".into(),description:"Execute a shell command on this device, with its OS account. Commands may change the system. Use platform-appropriate commands and report actual results.".into(),parameters:source["components"]["schemas"]["SystemExecInput"].clone()},ToolDefinition{name:"publish_service".into(),description:"Publish an existing local TCP service into a joined network.".into(),parameters:expanded_service_schema(&source)}];
-    tools.push(ToolDefinition{name:"rove_api".into(),description:format!("Manage Rove on this device through the same API as the CLI. Use list_networks to obtain network IDs and list_services with query_parameters.network_id to see services. Read settings/device/network/service state, update settings, publish/update/unpublish services. Use path_parameters.service_id for service operations. Service write body schema: {}", expanded_service_schema(&source)),parameters:source["components"]["schemas"]["RoveApiInput"].clone()});
+    tools.push(ToolDefinition{name:"rove_api".into(),description:format!("Manage this device or a discovered peer through the Rove agent API. Omit target for local operations. Discover peers with list_networks and list_network_devices (path_parameters.network_id); remote calls require target {{network_id,device_id}}. For remote work use create_session with a stable UUID session_id (no execution_target), then submit_run with path_parameters.session_id and body {{request_id: stable UUID, message: task}}. Query get_run with path_parameters.run_id or list_runs with query_parameters.session_id; cancel_run explicitly cancels remote work. Session/run tools require a remote target. Keep IDs for recovery: on an unknown outcome query first, never resubmit with a new ID. Remote peers use their own model configuration. Use path_parameters.service_id for service operations. Service write body schema: {}", expanded_service_schema(&source)),parameters:management_schema});
     for _step in 0..32 {
         if cancel.is_cancelled() {
             return Err(cancelled());
@@ -184,8 +187,11 @@ async fn execute_with<M: CompletionModel + Clone + 'static>(
         let request = model.completion_request(prompt.clone()).messages(history.clone()).preamble(format!(
             concat!(
                 "You are rove-agent, a lightweight assembly agent on device {} ({} / {}). ",
-                "Execute only on this device. Network context: {}. Rove data directory (JSON string): {}. ",
+                "This conversation belongs to this device; orchestrate it locally. Network context: {}. Rove data directory (JSON string): {}. ",
                 "You have system_exec, publish_service and rove_api. ",
+                "system_exec and publish_service operate only on this device. For another device, discover its identity and use rove_api with explicit target to ask its agent to execute the task. ",
+                "Device nicknames are private local aliases, not advertised display_name values. When the user names a device, first call rove_api resolve_device_alias with body {{alias: the exact name}}, without target; list_device_aliases lists local names. Use only the returned target and current addresses. If resolution fails, ask for clarification or report offline; never guess by IP/display_name or substitute this device. is_local=true explicitly identifies this device. Aliases can differ on each device. ",
+                "Never substitute local execution for an unreachable remote device. Return actual remote results to this conversation; accepted or queued is not completed. ",
                 "For Rove storage maintenance, inspect first and explain paths, size and risks. ",
                 "Start with rove_api get_storage_usage (no body) for bounded metadata-only usage, and get_device/get_settings for runtime state. ",
                 "Its total_bytes is logical file size, not disk allocation or safely reclaimable space; complete=false means the scan is partial. ",

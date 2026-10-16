@@ -206,6 +206,7 @@ fn ipc_commands_share_the_sdk_and_preserve_targets_and_agent_lifetime() {
         .invoke_handler(tauri::generate_handler![
             super::agent_call,
             super::share_qr,
+            super::network_config_qr,
             super::agent_events
         ])
         .build(tauri::generate_context!())
@@ -364,6 +365,16 @@ fn ipc_commands_share_the_sdk_and_preserve_targets_and_agent_lifetime() {
     let svg = invoke(&first, "share_qr", json!({"url":url})).unwrap();
     assert!(svg.as_str().unwrap().starts_with("<svg"));
     assert!(!svg.as_str().unwrap().contains("example.invalid"));
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../tests/browser/network-qr.json")).unwrap();
+    let config_svg = invoke(
+        &first,
+        "network_config_qr",
+        json!({"config":fixture["payload"]}),
+    )
+    .unwrap();
+    assert!(config_svg.as_str().unwrap().starts_with("<svg"));
+    assert!(invoke(&first, "network_config_qr", json!({"config":""})).is_err());
     first.close().unwrap();
     second.close().unwrap();
     main.close().unwrap();

@@ -87,6 +87,87 @@ async fn finished(agent: &Arc<Agent>, run: &str) -> Value {
 }
 
 #[tokio::test]
+async fn local_conversation_delegates_with_management_tool_without_changing_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let origin = Agent::open(&temp.path().join("origin")).unwrap();
+    let peer = Agent::open(&temp.path().join("peer")).unwrap();
+    let network = Uuid::new_v4();
+    let local = call(&origin, Request::new("create_session").with_body(json!({}))).await;
+    let (url, server, stop) = listen(peer.clone(), network).await;
+    route(&origin, &peer, url);
+    let target = json!({"network_id":network,"device_id":peer.store.device_id});
+    let invoke = |input: Value| {
+        let origin = origin.clone();
+        let target = target.clone();
+        async move {
+            let mut input = input;
+            input["target"] = target;
+            crate::management::call(&origin, &input).await
+        }
+    };
+    let device = invoke(json!({"operation_id":"get_device"}))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(device["device_id"], json!(peer.store.device_id));
+    let session_id = Uuid::new_v4();
+    let create = json!({"operation_id":"create_session","body":{"session_id":session_id,"title":"Delegated work"}});
+    let remote = invoke(create.clone()).await.unwrap().unwrap();
+    assert_eq!(remote["device_id"], json!(peer.store.device_id));
+    assert!(remote["execution_target"].is_null());
+    assert_eq!(
+        invoke(create).await.unwrap().unwrap()["session_id"],
+        json!(session_id)
+    );
+    let (gate, _entered, provider) = model(&peer).await;
+    gate.add_permits(1);
+    let submit = json!({"operation_id":"submit_run","path_parameters":{"session_id":session_id},"body":{"request_id":Uuid::new_v4(),"message":"Report remote status"}});
+    let run = invoke(submit.clone()).await.unwrap().unwrap();
+    let snapshot = finished(&peer, run["run_id"].as_str().unwrap()).await;
+    assert_eq!(snapshot["run"]["status"], "succeeded");
+    let result =
+        invoke(json!({"operation_id":"get_run","path_parameters":{"run_id":run["run_id"]}}))
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(
+        result["output_tail"]
+            .as_str()
+            .unwrap()
+            .contains("remote progress")
+    );
+    assert_eq!(
+        invoke(submit).await.unwrap().unwrap()["run_id"],
+        run["run_id"]
+    );
+    let local_after = call(&origin, for_session("get_session", &local)).await;
+    assert_eq!(local_after, local);
+    assert!(
+        call(&origin, list_runs(&local)).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        call(&origin, Request::new("list_sessions")).await["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    stop.cancel();
+    server.await.unwrap();
+    let error = invoke(json!({"operation_id":"update_settings","body":{"max_active_runs":9}}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "target_unreachable");
+    assert_eq!(origin.store.settings().unwrap()["max_active_runs"], 4);
+    provider.abort();
+    origin.shutdown().await;
+    peer.shutdown().await;
+}
+
+#[tokio::test]
 async fn linked_auto_title_waits_for_acceptance_and_cache_preserves_manual_rename() {
     let temp = tempfile::tempdir().unwrap();
     let origin = Agent::open(&temp.path().join("origin")).unwrap();

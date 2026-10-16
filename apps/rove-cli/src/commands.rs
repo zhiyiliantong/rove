@@ -37,7 +37,8 @@ pub enum Network {
         network_id: Uuid,
     },
     Create {
-        name: String,
+        /// Optional display name; the agent generates net-xx when omitted.
+        name: Option<String>,
         #[arg(long)]
         bootstrap_peer: Vec<String>,
         /// Use manual addressing in this subnet instead of EasyTier DHCP.
@@ -50,6 +51,12 @@ pub enum Network {
     /// Test TCP reachability only; no network join or credential exchange.
     TestPeer {
         endpoint: String,
+    },
+    /// List filtered public EasyTier bootstrap nodes from the configured discovery service.
+    PublicNodes,
+    /// Preview an http(s)://, txt://, or srv:// EasyTier discovery chain.
+    ResolvePeer {
+        url: String,
     },
     /// Import a share URL; use '-' to read it from stdin without shell history.
     Join {
@@ -105,7 +112,7 @@ impl Network {
                 subnet,
                 local_ipv4,
             } => {
-                let mut body = json!({"display_name":name});
+                let mut body = name.map_or_else(|| json!({}), |name| json!({"display_name":name}));
                 if let Some(subnet) = subnet {
                     body["config"] = json!({"network_name":format!("rove-{}",Uuid::new_v4()),"network_secret":format!("{}{}",Uuid::new_v4().simple(),Uuid::new_v4().simple()),"bootstrap_peers":bootstrap_peer,"dhcp":false,"ipv4_cidr":subnet});
                     body["local_ipv4"] = json!(local_ipv4);
@@ -116,6 +123,10 @@ impl Network {
             }
             Self::TestPeer { endpoint } => {
                 Request::new("test_network_peer").with_body(json!({"endpoint":endpoint}))
+            }
+            Self::PublicNodes => Request::new("list_public_bootstrap_nodes"),
+            Self::ResolvePeer { url } => {
+                Request::new("resolve_bootstrap_discovery").with_body(json!({"url":url}))
             }
             Self::Join { url } => Request::new("import_network")
                 .with_body(json!({"source":"url","url":input(&url)?.trim()})),
@@ -304,6 +315,10 @@ pub enum Config {
         config_server: Option<String>,
         #[arg(long)]
         clear_config_server: bool,
+        #[arg(long, conflicts_with = "clear_discovery_service")]
+        discovery_service: Option<String>,
+        #[arg(long)]
+        clear_discovery_service: bool,
     },
 }
 impl Config {
@@ -314,6 +329,8 @@ impl Config {
                 max_active_runs,
                 config_server,
                 clear_config_server,
+                discovery_service,
+                clear_discovery_service,
             } => {
                 let mut body = json!({});
                 if let Some(n) = max_active_runs {
@@ -324,6 +341,12 @@ impl Config {
                 }
                 if clear_config_server {
                     body["config_server_url"] = Value::Null;
+                }
+                if let Some(url) = discovery_service {
+                    body["discovery_service_url"] = json!(url);
+                }
+                if clear_discovery_service {
+                    body["discovery_service_url"] = Value::Null;
                 }
                 anyhow::ensure!(
                     !body.as_object().unwrap().is_empty(),

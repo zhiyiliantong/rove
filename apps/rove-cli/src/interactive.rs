@@ -46,7 +46,10 @@ pub async fn run(
             let mut request=match choice.as_str() {
                 "1"=>Request::new("get_device"),
                 "2"=>Request::new("list_networks"),
-                "3"=>Request::new("create_network").with_body(json!({"display_name":prompt("网络名称：",false)?})),
+                "3"=>{
+                    let name=prompt("网络名称（留空自动生成 net-xx）：",false)?;
+                    Request::new("create_network").with_body(if name.is_empty(){json!({})}else{json!({"display_name":name})})
+                },
                 "4"=>Request::new("import_network").with_body(json!({"source":"url","url":prompt("分享 URL（隐藏输入）：",true)?})),
                 "5"=>{
                     let config: Value=serde_json::from_str(&prompt("完整 JoinConfig JSON（隐藏输入）：",true)?).map_err(|_|anyhow::anyhow!("Invalid JSON"))?;

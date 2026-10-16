@@ -18,24 +18,20 @@ use tokio_util::sync::CancellationToken;
 #[path = "tool_tests.rs"]
 mod tests;
 
+#[path = "command_output.rs"]
+mod command_output;
+
 async fn read_pipe(
     mut pipe: impl AsyncRead + Unpin,
     stream: &'static str,
     tx: mpsc::Sender<(&'static str, String)>,
 ) -> std::io::Result<()> {
     let mut bytes = [0u8; 4096];
-    let mut pending = Vec::new();
+    let mut decoder = command_output::Decoder::native();
     loop {
         let size = pipe.read(&mut bytes).await?;
-        pending.extend_from_slice(&bytes[..size]);
-        let valid = match std::str::from_utf8(&pending) {
-            Ok(_) => pending.len(),
-            Err(e) if e.error_len().is_none() && size != 0 => e.valid_up_to(),
-            Err(_) => pending.len(),
-        };
-        if valid > 0 {
-            let text = String::from_utf8_lossy(&pending[..valid]).into_owned();
-            pending.drain(..valid);
+        let text = decoder.push(&bytes[..size], size == 0)?;
+        if !text.is_empty() {
             if tx.send((stream, text)).await.is_err() {
                 return Ok(());
             }

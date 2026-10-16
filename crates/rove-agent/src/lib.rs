@@ -1,4 +1,6 @@
 mod ai;
+mod bootstrap_discovery;
+mod device_aliases;
 #[cfg(unix)]
 mod embedded;
 mod management;
@@ -7,16 +9,21 @@ mod models;
 mod remote_sessions;
 #[cfg(unix)]
 pub use embedded::EmbeddedAgent;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub mod http;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod http_listener;
 mod network_probe;
-#[cfg(all(feature = "easytier", target_os = "linux"))]
+#[cfg(all(
+    feature = "easytier",
+    any(target_os = "linux", target_os = "android", windows)
+))]
 mod network_runtime;
 mod networks;
 #[cfg(feature = "easytier")]
 pub mod overlay;
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+mod overlay_platform;
 mod services;
 mod sessions;
 pub mod sharing;
@@ -27,6 +34,8 @@ pub mod tools;
 #[cfg(windows)]
 mod windows_pipe;
 use rove_protocol::{ApiError, Request, Response, contract::AGENT};
+#[cfg(not(target_os = "android"))]
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{path::Path, sync::Arc};
 use store::Store;
@@ -42,9 +51,103 @@ pub struct Agent {
     remote_test_routes: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, url::Url>>,
     #[cfg(test)]
     remote_drop_submit_response: std::sync::atomic::AtomicBool,
-    #[cfg(all(feature = "easytier", target_os = "linux"))]
+    #[cfg(all(
+        feature = "easytier",
+        any(target_os = "linux", target_os = "android", windows)
+    ))]
     network_driver: std::sync::OnceLock<network_runtime::Driver>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg(not(target_os = "android"))]
+struct PackageDefaults {
+    discovery_service_url: Option<String>,
+}
+
+#[cfg(not(target_os = "android"))]
+fn read_package_defaults(executable: &Path) -> anyhow::Result<Option<String>> {
+    let Some(directory) = executable.parent() else {
+        return Ok(None);
+    };
+    let path = directory.join("rove-defaults.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        std::fs::metadata(&path)?.len() <= 4096,
+        "rove-defaults.json exceeds 4096 bytes"
+    );
+    let defaults: PackageDefaults = serde_json::from_slice(&std::fs::read(path)?)?;
+    if let Some(value) = defaults.discovery_service_url.as_deref() {
+        bootstrap_discovery::validate_packaged_directory_root(value)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    }
+    Ok(defaults.discovery_service_url)
+}
+
+// Android runs inside app_process, not next to an installed agent executable.
+// Embed the distributor-selected default; never use app_process's directory.
+#[cfg(any(target_os = "android", test))]
+fn embedded_discovery_default(value: Option<&str>) -> anyhow::Result<Option<String>> {
+    value
+        .map(|value| {
+            anyhow::ensure!(value.len() <= 4096, "Discovery default exceeds 4096 bytes");
+            bootstrap_discovery::validate_packaged_directory_root(value)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            Ok(value.to_owned())
+        })
+        .transpose()
+}
+
+#[cfg(test)]
+mod package_defaults_tests {
+    use super::*;
+
+    #[test]
+    fn embedded_default_is_optional_and_validated() {
+        assert_eq!(embedded_discovery_default(None).unwrap(), None);
+        for value in ["http://10.1.2.237:8090", "https://directory.example"] {
+            assert_eq!(
+                embedded_discovery_default(Some(value)).unwrap().as_deref(),
+                Some(value)
+            );
+        }
+        for value in [
+            "http://public.example",
+            "https://user:secret@directory.example",
+            "invalid",
+        ] {
+            assert!(embedded_discovery_default(Some(value)).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn packaged_default_is_bounded_validated_and_optional() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("rove-agent.exe");
+        assert_eq!(read_package_defaults(&executable).unwrap(), None);
+
+        std::fs::write(
+            temp.path().join("rove-defaults.json"),
+            br#"{"discovery_service_url":"http://10.1.2.237:8090"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_package_defaults(&executable).unwrap().as_deref(),
+            Some("http://10.1.2.237:8090")
+        );
+
+        std::fs::write(
+            temp.path().join("rove-defaults.json"),
+            br#"{"discovery_service_url":"http://public.example:8090"}"#,
+        )
+        .unwrap();
+        assert!(read_package_defaults(&executable).is_err());
+    }
+}
+
 fn capabilities() -> Vec<&'static str> {
     let mut values = vec![
         "device_config",
@@ -63,8 +166,13 @@ impl Agent {
     pub fn open(path: &Path) -> anyhow::Result<Arc<Self>> {
         tokio::runtime::Handle::try_current()
             .map_err(|_| anyhow::anyhow!("Agent::open requires an active Tokio runtime"))?;
+        #[cfg(not(target_os = "android"))]
+        let packaged_discovery_service_url = read_package_defaults(&std::env::current_exe()?)?;
+        #[cfg(target_os = "android")]
+        let packaged_discovery_service_url =
+            embedded_discovery_default(option_env!("ROVE_DISCOVERY_SERVICE_URL"))?;
         let agent = Arc::new(Self {
-            store: Store::open(path)?,
+            store: Store::open_with_packaged_discovery(path, packaged_discovery_service_url)?,
             started_at: rove_core::now(),
             runtime: sessions::Runtime::default(),
             services: services::Runtime::default(),
@@ -73,7 +181,10 @@ impl Agent {
             remote_test_routes: Default::default(),
             #[cfg(test)]
             remote_drop_submit_response: Default::default(),
-            #[cfg(all(feature = "easytier", target_os = "linux"))]
+            #[cfg(all(
+                feature = "easytier",
+                any(target_os = "linux", target_os = "android", windows)
+            ))]
             network_driver: std::sync::OnceLock::new(),
         });
         agent.interrupt_old_runs()?;
@@ -82,7 +193,10 @@ impl Agent {
     }
     pub async fn shutdown(&self) {
         self.runtime.stopping.cancel();
-        #[cfg(all(feature = "easytier", target_os = "linux"))]
+        #[cfg(all(
+            feature = "easytier",
+            any(target_os = "linux", target_os = "android", windows)
+        ))]
         if let Some(driver) = self.network_driver.get() {
             let _guard = self.network_lifecycle.lock().await;
             driver.close(self).await;
@@ -116,7 +230,20 @@ impl Agent {
         request: &Request,
     ) -> Result<(u16, Option<Value>), ApiError> {
         AGENT.request(request)?;
-        #[cfg(all(feature = "easytier", target_os = "linux"))]
+        if device_aliases::is_local_operation(&request.operation_id) {
+            if request.target.is_some() {
+                return Err(ApiError::invalid(
+                    "Device aliases are local-only; omit target",
+                ));
+            }
+            return self
+                .device_alias_operation(request)
+                .map(|body| (200, Some(body)));
+        }
+        #[cfg(all(
+            feature = "easytier",
+            any(target_os = "linux", target_os = "android", windows)
+        ))]
         let joined_self = request.target.as_ref().is_some_and(|target| {
             target.device_id == self.store.device_id.0
                 && self.network_driver.get().is_some()
@@ -126,10 +253,16 @@ impl Agent {
                         record["state"] == "running" && record["enabled"] == true
                     })
         });
-        #[cfg(not(all(feature = "easytier", target_os = "linux")))]
+        #[cfg(not(all(
+            feature = "easytier",
+            any(target_os = "linux", target_os = "android", windows)
+        )))]
         let joined_self = false;
         if let Some(target) = request.target.as_ref().filter(|_| !joined_self) {
-            #[cfg(all(feature = "easytier", target_os = "linux"))]
+            #[cfg(all(
+                feature = "easytier",
+                any(target_os = "linux", target_os = "android", windows)
+            ))]
             if target.device_id != self.store.device_id.0 && self.network_driver.get().is_some() {
                 let response = self.target_client(target).await?.call(request.clone()).await
                     .map_err(|_| ApiError::new(503, "target_unreachable", "Remote outcome is unknown; no local execution or automatic resubmission occurred"))?;
@@ -183,6 +316,14 @@ impl Agent {
                     if key == "config_server_url" && !value.is_null() {
                         validate_server_url(value.as_str().unwrap())?;
                     }
+                    if key == "discovery_service_url" && !value.is_null() {
+                        let value = value.as_str().unwrap();
+                        if self.store.is_packaged_discovery_service_url(value) {
+                            crate::bootstrap_discovery::validate_packaged_directory_root(value)?;
+                        } else {
+                            crate::bootstrap_discovery::validate_directory_root(value)?;
+                        }
+                    }
                     settings[key] = value.clone();
                 }
                 self.store
@@ -196,6 +337,9 @@ impl Agent {
             "test_model" => Box::pin(self.test_model(body)).await?,
             "sync_model_connection" => return self.sync_model_connection(request).await,
             op if op.contains("model") => return self.model_operation(request),
+            "list_public_bootstrap_nodes" | "resolve_bootstrap_discovery" => {
+                return self.network_operation(request).await;
+            }
             op if op.contains("network") => return self.network_operation(request).await,
             op if op.contains("service") => return self.service_operation(request).await,
             op if op.contains("session") || op.contains("run") || op == "list_messages" => {

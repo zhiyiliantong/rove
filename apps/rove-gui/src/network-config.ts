@@ -4,6 +4,12 @@ export function network_secret():string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 
+export function generated_network_name():string {
+  const alphabet='abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes=crypto.getRandomValues(new Uint8Array(2));
+  return `net-${alphabet[bytes[0]%alphabet.length]}${alphabet[bytes[1]%alphabet.length]}`;
+}
+
 /** Normalize human CIDR input (including host bits); backend validates again. */
 export function normalize_subnet(input:string):string {
   const [raw,prefix,...rest]=input.trim().split('/');
@@ -16,7 +22,7 @@ export function normalize_subnet(input:string):string {
 }
 
 export function form_config(name:string,secret:string,peers:string[],automatic:boolean,cidr:string,original?:Record<string,Json>):Record<string,Json> {
-  const config:Record<string,Json>={network_name:original?.network_name??name.trim(),network_secret:secret,bootstrap_peers:[...new Set(peers.map(v=>v.trim()).filter(Boolean))],dhcp:automatic};
+  const config:Record<string,Json>={network_name:original?.network_name??name.trim(),network_secret:original?.network_secret??secret,bootstrap_peers:[...new Set(peers.map(v=>v.trim()).filter(Boolean))],dhcp:automatic};
   if(!automatic)config.ipv4_cidr=normalize_subnet(cidr);
   // Preserve historical DHCP metadata on edit, without treating it as a pool.
   else if(original?.dhcp===true&&original.ipv4_cidr)config.ipv4_cidr=original.ipv4_cidr;
